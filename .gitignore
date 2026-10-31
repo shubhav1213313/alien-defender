@@ -14,3 +14,6 @@ coverage/
 Thumbs.db
 desktop.ini
 *.log
+
+# Private demo notes with the fixed puzzle answers - never commit
+DEMO_QUIZ_ANSWERS.md

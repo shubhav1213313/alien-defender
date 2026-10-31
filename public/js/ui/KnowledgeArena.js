@@ -2,9 +2,9 @@ import { apiRequest } from '../api/apiClient.js';
 import { ABILITIES } from '../game/AbilityDefinitions.js';
 import { el } from './dom.js';
 
-// Knowledge Challenge screen.
-//   wave    - compulsory after waves 1-4: 2 questions, 2/2 unlocks the ability
-//             (waves 1-3: LOCAL FIXED questions; wave 4: Banana API puzzles)
+// Knowledge Challenge screen (Banana API puzzles).
+//   wave    - compulsory after waves 1-4: 2 puzzles, 2/2 unlocks the ability
+//             (waves 1-3: the same cached genuine puzzles; wave 4: live)
 //   bonus   - Victory Bonus Challenge after the boss: 2 puzzles for points
 //   special - optional VOID STORM puzzle: 1 puzzle, 20 s, no hint
 // Flow: instructions + reward preview -> puzzle(s) with 0-9 buttons ->
@@ -13,7 +13,7 @@ import { el } from './dom.js';
 // Continue without the ability, so the game can never get stuck.
 const ACHIEVEMENT_NAMES = { legendary_defender: 'Legendary Defender' };
 const TITLES = { wave: 'Knowledge Challenge', bonus: 'Victory Bonus Challenge', special: '⚡ Special Puzzle' };
-const LOCAL_FIXED = 'local-fixed';
+const CACHED = 'banana-cached';
 
 export function describeReward(reward) {
   const items = [];
@@ -53,7 +53,7 @@ export class KnowledgeArena {
     Object.assign(this, { kind, wave, nextWave, arena: null, reward: null, busy: false, correctSoFar: 0, answerable: false });
     this.title.textContent = TITLES[kind];
     this.subtitle.textContent = kind === 'wave'
-      ? `Wave ${wave} cleared! Combat is paused. Answer both questions before Wave ${nextWave}.`
+      ? `Wave ${wave} cleared! Combat is paused. Solve the Banana puzzles before Wave ${nextWave}.`
       : kind === 'bonus'
         ? 'The Mothership is destroyed. Two final puzzles for bonus points.'
         : 'Combat is paused while you solve this puzzle.';
@@ -75,9 +75,7 @@ export class KnowledgeArena {
       el('p', { class: 'reward-preview' }, rules.preview),
       ability ? el('p', { class: 'arena-abilities' }, `${ability.name} (key ${ability.slot}, ${ability.cost} energy): ${ability.description}`) : null,
       el('ol', { class: 'arena-instructions' },
-        el('li', {}, rules.source === LOCAL_FIXED
-          ? 'These are local fixed quiz questions (not Banana API puzzles): work out each sum.'
-          : 'Each picture is a real Banana puzzle: work out the number hidden behind the banana.'),
+        el('li', {}, 'Each picture is a real Banana puzzle: work out the number hidden behind the banana.'),
         el('li', {}, 'Answer with the 0-9 buttons or your keyboard. You get ONE answer per puzzle.'),
         el('li', {}, `You have ${rules.timeLimitSeconds} seconds per puzzle.${rules.hintsAllowed ? ' Stuck? Use the hint button once per puzzle.' : ''}`),
         el('li', {}, `Every correct answer also gives +${rules.energyPerCorrect} Knowledge Energy for using abilities.`),
@@ -108,7 +106,7 @@ export class KnowledgeArena {
   // ---- Questions -----------------------------------------------------------
 
   async loadQuestion() {
-    this.showLoading(this.rules && this.rules.source === LOCAL_FIXED ? 'Loading the question…' : 'Fetching a puzzle from the Banana API…');
+    this.showLoading(this.rules && this.rules.source === CACHED ? 'Loading the puzzle…' : 'Fetching a puzzle from the Banana API…');
     try {
       this.question = await this.api(`/api/challenges/${this.arena.arenaId}/question`);
       this.renderQuestion();
@@ -129,20 +127,17 @@ export class KnowledgeArena {
       : null;
     this.timerBar = el('div', { class: 'arena-timer-fill' });
     this.timerText = el('span', { class: 'arena-timer-text' });
-    const local = q.source === LOCAL_FIXED;
 
     this.body.replaceChildren(
       el('div', { class: 'arena-progress' },
-        el('strong', {}, `${local ? 'QUESTION' : 'PUZZLE'} ${q.questionNumber} OF ${q.totalQuestions}`),
+        el('strong', {}, `PUZZLE ${q.questionNumber} OF ${q.totalQuestions}`),
         el('span', {}, `${this.correctSoFar} correct so far`),
-        local
-          ? el('span', { class: 'badge local' }, 'Local fixed question')
+        q.source === CACHED
+          ? el('span', { class: 'badge cached', title: 'A genuine Banana API puzzle saved from the API - the same one every game' }, 'Banana API puzzle · cached')
           : el('span', { class: 'badge live' }, `Live Banana API · ${q.latencyMs} ms`)),
       el('div', { class: 'arena-timer' }, this.timerBar, this.timerText),
-      local
-        ? el('p', { class: 'arena-equation' }, q.text)
-        : el('img', { class: 'arena-puzzle', src: q.image, alt: 'Banana mathematics puzzle: find the number hidden behind the banana' }),
-      el('p', { class: 'arena-ask' }, local ? 'What is the answer?' : 'What number is hidden behind the banana?'),
+      el('img', { class: 'arena-puzzle', src: q.image, alt: 'Banana mathematics puzzle: find the number hidden behind the banana' }),
+      el('p', { class: 'arena-ask' }, 'What number is hidden behind the banana?'),
       el('div', { class: 'digit-pad', role: 'group', 'aria-label': 'Answer buttons 0 to 9' }, buttons),
       hintButton,
       hintText,

@@ -77,8 +77,8 @@ describe('Validation', () => {
     expect(() => calculateRewards({ kind: 'upgradeBay', wave: 1, correct: 0 })).toThrow('Unknown challenge kind');
   });
 
-  test('waves 1-3 use local fixed questions; wave 4, bonus and special use the Banana API', () => {
-    expect([1, 2, 3].map((w) => describeChallenge('wave', w).source)).toEqual(['local-fixed', 'local-fixed', 'local-fixed']);
+  test('waves 1-3 use the cached fixed Banana puzzles; wave 4, bonus and special use the live Banana API', () => {
+    expect([1, 2, 3].map((w) => describeChallenge('wave', w).source)).toEqual(['banana-cached', 'banana-cached', 'banana-cached']);
     expect(describeChallenge('wave', 4).source).toBe('banana');
     expect(describeChallenge('bonus', 5).source).toBe('banana');
     expect(describeChallenge('special', 1).source).toBe('banana');

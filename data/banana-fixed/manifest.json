@@ -1,0 +1,59 @@
+{
+  "source": "https://marcconrad.com/uob/banana/api.php?out=json&base64=yes",
+  "puzzles": [
+    {
+      "id": "W1-Q1",
+      "wave": 1,
+      "question": 1,
+      "file": "wave1-q1.png",
+      "solution": 7,
+      "sha256": "d0ee614536db6253ee4d7516dd36f790337a6e114dd2e6d4e1aea3ea48a46f39",
+      "fetchedAt": "2026-10-31T17:13:36.139Z"
+    },
+    {
+      "id": "W1-Q2",
+      "wave": 1,
+      "question": 2,
+      "file": "wave1-q2.png",
+      "solution": 0,
+      "sha256": "193db752c784b1912a16416003d8ffc3c625ebfc48521c2825d8bafdb99efcfb",
+      "fetchedAt": "2026-10-31T17:13:36.938Z"
+    },
+    {
+      "id": "W2-Q1",
+      "wave": 2,
+      "question": 1,
+      "file": "wave2-q1.png",
+      "solution": 4,
+      "sha256": "bd23d28bab3ff36434d5c6f456bd3181b3a800cf7e2123db496ae08dea9c9b2d",
+      "fetchedAt": "2026-10-31T17:13:37.266Z"
+    },
+    {
+      "id": "W2-Q2",
+      "wave": 2,
+      "question": 2,
+      "file": "wave2-q2.png",
+      "solution": 0,
+      "sha256": "6af3fd7a4b182011f31f1e1a71b6f96f2c6ef3a48296e0678cfb5f5a2b5a3596",
+      "fetchedAt": "2026-10-31T17:13:37.609Z"
+    },
+    {
+      "id": "W3-Q1",
+      "wave": 3,
+      "question": 1,
+      "file": "wave3-q1.png",
+      "solution": 0,
+      "sha256": "0aa503c3f12bf3b48739d10df210e32df3beed3f5c77c1ef8acf106dbfa337b8",
+      "fetchedAt": "2026-10-31T17:13:37.943Z"
+    },
+    {
+      "id": "W3-Q2",
+      "wave": 3,
+      "question": 2,
+      "file": "wave3-q2.png",
+      "solution": 3,
+      "sha256": "55da257ef9b21e4bef8c12254bad7c75eaeb80b39f9fdbaae07d4c710d2321f1",
+      "fetchedAt": "2026-10-31T17:13:38.303Z"
+    }
+  ]
+}

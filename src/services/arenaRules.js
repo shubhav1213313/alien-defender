@@ -1,7 +1,7 @@
 // Rules and rewards for the Knowledge Challenges.
 //
-//   wave    - COMPULSORY after waves 1-4: two questions (waves 1-3 use LOCAL
-//             FIXED questions, wave 4 live Banana puzzles). 2/2 unlocks that
+//   wave    - COMPULSORY after waves 1-4: two Banana puzzles (waves 1-3: the
+//             same cached genuine puzzles every game; wave 4: live). 2/2 unlocks that
 //             wave's ability; 0/2 or 1/2 unlocks nothing, but the next wave
 //             always starts.
 //   bonus   - the Victory Bonus Challenge after the boss: two puzzles for
@@ -86,7 +86,7 @@ function describeChallenge(kind, wave) {
     source: fixed ? FIXED_SOURCE : 'banana',
     bonusPointsPerCorrect: kind === 'bonus' ? BONUS_POINTS : null,
     note: fixed
-      ? 'These are local fixed quiz questions (not live Banana API puzzles). Each question allows one answer.'
+      ? 'These are genuine Banana API puzzles saved (cached) from the API - the same two every game, not fetched live. Each puzzle allows one answer.'
       : 'Puzzles come live from the Banana API, which has no difficulty setting. '
         + (kind === 'special' ? 'This one is harder only because of the 20-second limit and no hint.' : 'Each puzzle allows one answer.'),
   };
