@@ -4,13 +4,15 @@ import { EventBus } from './EventBus.js';
 import { GameStateManager, GameState } from './GameStateManager.js';
 import { CollisionManager } from './CollisionManager.js';
 import { ParticleSystem } from './ParticleSystem.js';
+import { EnemyFactory } from './EnemyFactory.js';
 
 // Owns the requestAnimationFrame loop and wires the game systems together.
 //   input  -> update(dt) -> collision events -> state changes -> render()
 // update() never touches the canvas, so the whole simulation can be driven
 // from Jest by calling update() with a fixed dt.
 export class GameEngine {
-  constructor({ canvas = null, input, bus = new EventBus() }) {
+  constructor({ canvas = null, input, bus = new EventBus(), useTrainingSpawner = false }) {
+    this.useTrainingSpawner = useTrainingSpawner;
     this.canvas = canvas;
     this.ctx = canvas ? canvas.getContext('2d') : null;
     this.input = input;
@@ -18,6 +20,7 @@ export class GameEngine {
     this.state = new GameStateManager(bus);
     this.collisions = new CollisionManager(bus);
     this.particles = new ParticleSystem();
+    this.enemyFactory = new EnemyFactory();
     this.stars = Array.from({ length: 90 }, () => ({
       x: Math.random() * WORLD_WIDTH,
       y: Math.random() * WORLD_HEIGHT,
@@ -41,14 +44,55 @@ export class GameEngine {
     this.particles.clear();
     this.damageFlash = 0;
     this.elapsed = 0;
+    this.score = 0;
+    this.stats = { enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0 };
+    this.trainingSpawnTimer = 1;
   }
 
   // Event-driven reactions to collisions. Other systems (HUD, audio,
   // achievements) can subscribe to the same events independently.
   registerEventHandlers() {
-    const hurtPlayer = ({ damage }) => this.damagePlayer(damage);
-    this.bus.on('collision:playerHit', hurtPlayer);
-    this.bus.on('collision:playerRammed', hurtPlayer);
+    this.bus.on('collision:playerHit', ({ damage }) => this.damagePlayer(damage));
+    this.bus.on('collision:enemyHit', ({ projectile, enemy }) => this.hitEnemy(enemy, projectile.damage));
+    // Ramming the player destroys the alien (no points) and hurts the player.
+    this.bus.on('collision:playerRammed', ({ enemy, damage }) => {
+      enemy.alive = false;
+      this.particles.burst(enemy.x, enemy.y, { color: enemy.color, count: 24 });
+      this.damagePlayer(damage);
+    });
+  }
+
+  // Used by enemies to fire bullets into the world.
+  spawnProjectile(projectile) {
+    this.projectiles.push(projectile);
+  }
+
+  spawnEnemy(type, x, y) {
+    const enemy = this.enemyFactory.create(type, x, y);
+    this.enemies.push(enemy);
+    return enemy;
+  }
+
+  hitEnemy(enemy, damage) {
+    this.stats.shotsHit += 1;
+    const destroyed = enemy.takeHit(damage);
+    this.particles.burst(enemy.x, enemy.y, { color: '#ffffff', count: 4, speed: 120, life: 0.25, size: 2 });
+    if (!destroyed) return;
+    this.stats.enemiesDestroyed += 1;
+    this.score += enemy.points;
+    this.particles.burst(enemy.x, enemy.y, { color: enemy.color, count: 26, speed: 260 });
+    this.bus.emit('enemy:destroyed', { enemy, type: enemy.type, points: enemy.points });
+  }
+
+  // Temporary endless spawner so the enemy milestone is playable on its own.
+  // Replaced by WaveManager in the wave milestone.
+  updateTrainingSpawner(dt) {
+    this.trainingSpawnTimer -= dt;
+    if (this.trainingSpawnTimer > 0) return;
+    this.trainingSpawnTimer = 1.1;
+    const types = this.enemyFactory.types;
+    const type = types[Math.floor(Math.random() * types.length)];
+    this.spawnEnemy(type, 40 + Math.random() * (WORLD_WIDTH - 80), -30);
   }
 
   damagePlayer(amount) {
@@ -120,10 +164,12 @@ export class GameEngine {
       const shots = this.player.fire();
       if (shots.length) {
         this.projectiles.push(...shots);
+        this.stats.shotsFired += shots.length;
         this.bus.emit('player:fire', { count: shots.length });
       }
     }
 
+    if (this.useTrainingSpawner) this.updateTrainingSpawner(dt);
     for (const enemy of this.enemies) enemy.update(dt, this);
     for (const p of this.projectiles) p.update(dt);
 
@@ -182,5 +228,10 @@ export class GameEngine {
     };
     bar(16, 26, 'HULL', this.player.health, this.player.maxHealth, '#39f3c4');
     bar(16, 56, 'SHIELD', this.player.shield, this.player.maxShield, '#50aaff');
+    ctx.fillStyle = '#e6f1ff';
+    ctx.font = 'bold 20px Segoe UI, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`SCORE ${this.score.toLocaleString()}`, WORLD_WIDTH - 16, 34);
+    ctx.textAlign = 'left';
   }
 }

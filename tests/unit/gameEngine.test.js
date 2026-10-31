@@ -92,6 +92,41 @@ describe('GameEngine simulation', () => {
     expect(over).toHaveBeenCalled();
   });
 
+  test('shooting an enemy to death awards points and emits enemy:destroyed', () => {
+    const { engine } = newEngine();
+    engine.startGame();
+    const destroyed = jest.fn();
+    engine.bus.on('enemy:destroyed', destroyed);
+    const scout = engine.spawnEnemy('scout', 300, 200);
+    engine.projectiles.push(new Projectile({ x: scout.x, y: scout.y, vy: 0, owner: 'player' }));
+    engine.update(0.001);
+    expect(scout.alive).toBe(false);
+    expect(engine.enemies).toHaveLength(0);
+    expect(engine.score).toBe(scout.points);
+    expect(engine.stats.enemiesDestroyed).toBe(1);
+    expect(destroyed).toHaveBeenCalledWith(expect.objectContaining({ type: 'scout', points: 100 }));
+  });
+
+  test('an enemy ramming the player is destroyed without awarding points', () => {
+    const { engine } = newEngine();
+    engine.startGame();
+    const { x, y } = engine.player;
+    engine.spawnEnemy('kamikaze', x, y);
+    engine.update(0.001);
+    expect(engine.enemies).toHaveLength(0);
+    expect(engine.score).toBe(0);
+    expect(engine.player.shield + engine.player.health).toBeLessThan(125);
+  });
+
+  test('enemy bullets are added to the world via spawnProjectile', () => {
+    const { engine } = newEngine();
+    engine.startGame();
+    const tank = engine.spawnEnemy('armored', 300, 100);
+    // Step at a normal frame rate (the real loop caps dt at 0.05s).
+    for (let t = 0; t < tank.fireInterval + 0.05; t += 1 / 60) engine.update(1 / 60);
+    expect(engine.projectiles.filter((p) => p.owner === 'enemy').length).toBe(3);
+  });
+
   test('restart after game over gives a fresh player', () => {
     const { engine } = newEngine();
     engine.startGame();
