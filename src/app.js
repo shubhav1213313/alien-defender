@@ -13,6 +13,8 @@ const { AuthService } = require('./services/authService');
 const { ScoreService } = require('./services/scoreService');
 const { ChallengeService } = require('./services/challengeService');
 const { PuzzleService } = require('./services/puzzleService');
+const { QuoteService } = require('./services/quoteService');
+const { createInfoRouter } = require('./routes/infoRoutes');
 const { createSessionMiddleware, sessionTimeouts } = require('./middleware/session');
 const { createHealthRouter } = require('./routes/healthRoutes');
 const { createAuthRouter } = require('./routes/authRoutes');
@@ -50,7 +52,9 @@ function createApp(options = {}) {
     pool = options.repositories && options.sessionStore ? null : getPool(),
     repositories = createRepositories(pool),
     sessionStore = createMySqlSessionStore(pool),
-    challengeService = new ChallengeService({ puzzleProvider: new PuzzleService({ timeoutMs: config.apis.bananaTimeoutMs }) }),
+    puzzleService = new PuzzleService({ timeoutMs: config.apis.bananaTimeoutMs }),
+    challengeService = new ChallengeService({ puzzleProvider: puzzleService }),
+    quoteService = new QuoteService({ timeoutMs: config.apis.quotesTimeoutMs }),
     rateLimiting = true,
     bcryptRounds = config.bcryptRounds,
     now = () => Date.now(),
@@ -94,6 +98,7 @@ function createApp(options = {}) {
   app.use('/api/auth', createAuthRouter({ auth, users: repositories.users, now }, { limit: rateLimiting }));
   app.use('/api/challenges', createChallengeRouter(challengeService, { limitCreation: rateLimiting, scores }));
   app.use('/api', createGameRouter({ scores, achievements: repositories.achievements }));
+  app.use('/api', createInfoRouter({ quotes: quoteService, puzzles: puzzleService }));
 
   app.use('/api', notFound);
   app.use(errorHandler);

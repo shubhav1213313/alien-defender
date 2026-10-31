@@ -179,6 +179,16 @@ body {
 .save-status { min-height: 1.2em; text-align: center; }
 .new-trophies { list-style: none; margin: 4px 0 0; padding: 0; color: #ffd166; }
 
+/* ---- Quotes and API status ---------------------------------------------- */
+.quote { margin: 4px 0 0; max-width: 560px; text-align: center; min-height: 2.6em; }
+.quote blockquote { margin: 0; font-style: italic; color: var(--fg); font-size: 0.9rem; }
+.quote figcaption { margin-top: 2px; font-size: 0.75rem; color: var(--muted); }
+.quote a { color: var(--accent); }
+.quote .offline { color: var(--muted); font-style: italic; }
+.quote-loading { margin: 0; color: var(--muted); }
+.api-status { font-size: 0.75rem; }
+.api-status.degraded { color: #ff9f1c; }
+
 /* ---- Panels (login, profile, leaderboard) ------------------------------ */
 .overlay.panel { z-index: 5; background: rgba(5, 7, 15, 0.94); justify-content: flex-start; overflow-y: auto; }
 .panel-box { position: relative; width: min(100%, 420px); display: flex; flex-direction: column; gap: 10px; }
