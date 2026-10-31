@@ -20,6 +20,7 @@ export class Enemy {
     speed = 100,
     points = 100,
     contactDamage = 20,
+    escapeDamage = 10, // Earth shield damage if this alien gets past the player
     fireInterval = Infinity,
     projectileSpeed = 260,
     projectileDamage = 10,
@@ -39,6 +40,7 @@ export class Enemy {
     this.speed = speed * m.speed;
     this.points = points;
     this.contactDamage = contactDamage;
+    this.escapeDamage = escapeDamage;
     this.fireInterval = fireInterval / m.fireRate;
     this.projectileSpeed = projectileSpeed * m.projectileSpeed;
     this.projectileDamage = projectileDamage;

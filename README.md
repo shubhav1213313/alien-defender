@@ -3,8 +3,21 @@
 A browser-based 2D alien survival shooter that combines arcade action with
 mathematics puzzles. Built for **CIS046-3 Software for Enterprise**.
 
-> **Status:** in development. Milestone 1 (project foundation) is complete.
-> This README is extended as each milestone is finished.
+> **Status:** in development. Milestones 1–4 complete (foundation, combat
+> engine, five enemy types, waves/difficulty/scoring). This README is
+> extended as each milestone is finished.
+
+## Gameplay so far
+
+- Five waves of increasing size and variety, each introduced by a banner.
+- Five alien types: **Scout** (fast weaver), **Zigzag Raider** (erratic),
+  **Armored Alien** (tough, 3-way spread), **Sniper** (telegraphed aimed
+  shots), **Kamikaze** (locks on and dives).
+- **Easy / Normal / Hard** change enemy speed, health, fire rate, bullet
+  speed, damage taken, spawn rate, Earth shield and score multiplier.
+- Hull + shield for the player; an **Earth shield** that drops when aliens
+  slip past. Either reaching zero ends the game.
+- Combo multiplier (x1.5 every 5 rapid kills, max x4) and wave-clear bonuses.
 
 ## Technology stack
 
@@ -61,8 +74,9 @@ alienn-defender/
 | Key | Action |
 |---|---|
 | W A S D / Arrow keys | Move |
-
-More controls are added as gameplay milestones are completed.
+| Space | Shoot (hold) |
+| P / Esc | Pause / resume |
+| Enter | Start a game from the menu or end screens |
 
 ## API endpoints
 

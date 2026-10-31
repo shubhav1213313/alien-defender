@@ -76,7 +76,7 @@ export class ArmoredAlien extends Enemy {
   constructor(opts) {
     super({
       ...opts, type: 'armored', width: 52, height: 42, health: 7, speed: 45, points: 300,
-      contactDamage: 35, fireInterval: 2.6, projectileSpeed: 220, projectileDamage: 12, color: '#ff9f1c',
+      contactDamage: 35, escapeDamage: 25, fireInterval: 2.6, projectileSpeed: 220, projectileDamage: 12, color: '#ff9f1c',
     });
   }
 

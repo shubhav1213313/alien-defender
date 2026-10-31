@@ -32,15 +32,26 @@ describe('GameEngine simulation', () => {
     expect(engine.player.x).toBe(x);
   });
 
-  test('startGame enters PLAYING and announces game:start', () => {
+  test('startGame shows the wave 1 banner, then starts wave 1', () => {
     const { engine } = newEngine();
     const started = jest.fn();
+    const waveStart = jest.fn();
     engine.bus.on('game:start', started);
+    engine.bus.on('wave:start', waveStart);
     expect(engine.startGame()).toBe(true);
-    expect(engine.state.state).toBe(GameState.PLAYING);
+    expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
+    expect(engine.banner.title).toBe('WAVE 1');
     expect(started).toHaveBeenCalled();
     // A duplicate start (e.g. Enter + button click) is ignored.
     expect(engine.startGame()).toBe(false);
+    for (let t = 0; t < 2.6; t += 0.05) engine.update(0.05);
+    expect(engine.state.state).toBe(GameState.PLAYING);
+    // Pressing Enter mid-wave must not restart the game either.
+    engine.update(1);
+    const wave = engine.waves.waveNumber;
+    expect(engine.startGame()).toBe(false);
+    expect(engine.waves.waveNumber).toBe(wave);
+    expect(waveStart).toHaveBeenCalledWith(expect.objectContaining({ wave: 1, name: 'First Contact' }));
   });
 
   test('holding fire spawns projectiles that fly up and are removed off-screen', () => {
@@ -132,7 +143,9 @@ describe('GameEngine simulation', () => {
     engine.startGame();
     engine.damagePlayer(1000);
     engine.startGame();
-    expect(engine.state.state).toBe(GameState.PLAYING);
+    expect(engine.isActive).toBe(true);
+    expect(engine.score).toBe(0);
+    expect(engine.waves.waveNumber).toBe(0);
     expect(engine.player.health).toBe(engine.player.maxHealth);
     expect(engine.projectiles).toHaveLength(0);
   });
