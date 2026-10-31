@@ -10,6 +10,7 @@ import { ScoreManager } from './ScoreManager.js';
 import { getDifficulty } from './DifficultySettings.js';
 import { Boss } from './Boss.js';
 import { AbilityManager } from './AbilityManager.js';
+import { EarthRenderer } from './EarthRenderer.js';
 
 const WAVE_BANNER_SECONDS = 2.5;
 const WAVE_CLEAR_BONUS = 500; // x wave number
@@ -41,12 +42,22 @@ export class GameEngine {
     this.scoreManager = new ScoreManager(bus);
     this.waves = new WaveManager({ bus, spawn: (type, x, y) => this.spawnEnemy(type, x, y) });
     this.abilities = new AbilityManager(bus);
-    this.stars = Array.from({ length: 90 }, () => ({
-      x: Math.random() * WORLD_WIDTH,
-      y: Math.random() * WORLD_HEIGHT,
-      speed: 20 + Math.random() * 80,
-      size: Math.random() < 0.15 ? 2 : 1,
-    }));
+    // Three parallax layers: far stars drift slowly, near stars quickly.
+    const tints = ['#9ff6ff', '#ffffff', '#ffc2fb', '#c9d6ff'];
+    this.stars = Array.from({ length: 120 }, () => {
+      const near = Math.random();
+      return {
+        x: Math.random() * WORLD_WIDTH,
+        y: Math.random() * WORLD_HEIGHT,
+        speed: 12 + near * 90,
+        size: near > 0.85 ? 2 : 1,
+        tint: tints[Math.floor(Math.random() * tints.length)],
+        twinkle: 1 + Math.random() * 3,
+      };
+    });
+    this.earthView = new EarthRenderer();
+    this.earthHitFlash = 0;
+    this.clock = 0; // always runs (menus too) - drives purely visual animation
     this.lastTime = 0;
     this.running = false;
     this.loop = this.loop.bind(this);
@@ -243,6 +254,7 @@ export class GameEngine {
     if (!this.isActive) return;
     this.earth.shield = Math.max(0, this.earth.shield - amount);
     this.damageFlash = Math.max(this.damageFlash, 0.15);
+    this.earthHitFlash = 0.6; // the shield arc flickers
     this.bus.emit('earth:damaged', { amount, shield: this.earth.shield });
     if (this.earth.shield <= 0) this.endGame('earthFallen');
   }
@@ -518,6 +530,9 @@ export class GameEngine {
   }
 
   updateStars(dt) {
+    this.clock += dt;
+    this.earthView.update(dt);
+    this.earthHitFlash = Math.max(0, this.earthHitFlash - dt);
     for (const star of this.stars) {
       star.y += star.speed * dt;
       if (star.y > WORLD_HEIGHT) {
@@ -532,13 +547,15 @@ export class GameEngine {
   render() {
     const { ctx } = this;
     if (!ctx) return;
-    ctx.fillStyle = '#05070f';
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    ctx.fillStyle = '#9fb3d9';
-    for (const star of this.stars) ctx.fillRect(star.x, star.y, star.size, star.size);
+    this.drawSpace(ctx);
+    // Earth is always on screen - behind the menu title too.
+    this.earthView.draw(ctx, {
+      shieldRatio: this.earth.shield / this.earth.maxShield,
+      hitFlash: this.earthHitFlash,
+      time: this.clock,
+    });
 
     if (!this.state.is(GameState.MENU)) {
-      this.drawEarthLine(ctx);
       for (const enemy of this.enemies) enemy.draw(ctx);
       for (const p of this.projectiles) p.draw(ctx);
       if (!this.player.isDead) this.player.draw(ctx);
@@ -560,25 +577,43 @@ export class GameEngine {
       if (this.alert) this.drawAlert(ctx);
     }
 
+    if (this.isActive && this.player.health / this.player.maxHealth < 0.35) this.drawDangerVignette(ctx);
     if (this.damageFlash > 0) {
       ctx.fillStyle = `rgba(255, 40, 70, ${this.damageFlash * 1.2})`;
       ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     }
   }
 
-  // Glowing line at the bottom representing Earth's defence shield.
-  drawEarthLine(ctx) {
-    const strength = this.earth.shield / this.earth.maxShield;
-    ctx.save();
-    ctx.strokeStyle = `rgba(80, 170, 255, ${0.2 + strength * 0.6})`;
-    ctx.shadowColor = '#50aaff';
-    ctx.shadowBlur = 12 * strength;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, WORLD_HEIGHT - 2);
-    ctx.lineTo(WORLD_WIDTH, WORLD_HEIGHT - 2);
-    ctx.stroke();
-    ctx.restore();
+  // Deep-space backdrop: dark gradient, coloured nebulae, twinkling stars.
+  drawSpace(ctx) {
+    ctx.fillStyle = '#04050f';
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    const nebula = (x, y, r, color) => {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, color);
+      g.addColorStop(1, 'rgba(4, 5, 15, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    };
+    nebula(WORLD_WIDTH * 0.2, WORLD_HEIGHT * 0.2, 340, 'rgba(140, 40, 220, 0.22)');
+    nebula(WORLD_WIDTH * 0.85, WORLD_HEIGHT * 0.12, 300, 'rgba(0, 200, 255, 0.14)');
+    nebula(WORLD_WIDTH * 0.7, WORLD_HEIGHT * 0.65, 320, 'rgba(255, 40, 180, 0.12)');
+    for (const star of this.stars) {
+      ctx.fillStyle = star.size > 1 ? '#ffffff' : star.tint;
+      ctx.globalAlpha = 0.55 + 0.45 * Math.abs(Math.sin(this.clock * star.twinkle + star.x));
+      ctx.fillRect(star.x, star.y, star.size, star.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Red pulsing edges when the hull is low - a warning that is hard to miss.
+  drawDangerVignette(ctx) {
+    const pulse = 0.35 + 0.25 * Math.sin(this.clock * 6);
+    const g = ctx.createRadialGradient(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_HEIGHT * 0.45, WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH * 0.7);
+    g.addColorStop(0, 'rgba(255, 30, 60, 0)');
+    g.addColorStop(1, `rgba(255, 30, 60, ${pulse})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   }
 
   drawHud(ctx) {
@@ -588,7 +623,7 @@ export class GameEngine {
       ctx.fillStyle = color;
       ctx.fillRect(x, y, 180 * Math.max(0, value / max), 10);
       ctx.fillStyle = '#e6f1ff';
-      ctx.font = '12px Segoe UI, sans-serif';
+      ctx.font = '12px Orbitron, Segoe UI, sans-serif';
       ctx.fillText(`${label} ${Math.ceil(value)}/${max}`, x, y - 4);
     };
     bar(16, 26, 'HULL', this.player.health, this.player.maxHealth, '#39f3c4');
@@ -597,12 +632,12 @@ export class GameEngine {
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#e6f1ff';
-    ctx.font = 'bold 20px Segoe UI, sans-serif';
+    ctx.font = 'bold 20px Orbitron, Segoe UI, sans-serif';
     ctx.fillText(`SCORE ${this.score.toLocaleString()}`, WORLD_WIDTH - 16, 34);
     const { combo, multiplier } = this.scoreManager;
     if (combo > 1) {
       ctx.fillStyle = multiplier > 1 ? '#ffd166' : '#9fb3d9';
-      ctx.font = 'bold 15px Segoe UI, sans-serif';
+      ctx.font = 'bold 15px Orbitron, Segoe UI, sans-serif';
       ctx.fillText(`COMBO ${combo}  x${multiplier.toFixed(1)}`, WORLD_WIDTH - 16, 56);
     }
 
@@ -610,7 +645,7 @@ export class GameEngine {
     if (this.waves.waveNumber > 0) {
       ctx.textAlign = 'center';
       ctx.fillStyle = '#9fb3d9';
-      ctx.font = '13px Segoe UI, sans-serif';
+      ctx.font = '13px Orbitron, Segoe UI, sans-serif';
       ctx.fillText(`WAVE ${this.waves.waveNumber}/${this.waves.totalWaves} · ${this.difficulty.label.toUpperCase()}`, WORLD_WIDTH / 2, 22);
       ctx.fillStyle = 'rgba(255,255,255,0.12)';
       ctx.fillRect(WORLD_WIDTH / 2 - 100, 30, 200, 4);
@@ -661,7 +696,7 @@ export class GameEngine {
     const left = WORLD_WIDTH - width - 16;
     const baseY = WORLD_HEIGHT - 58;
     ctx.save();
-    ctx.font = '11px Segoe UI, sans-serif';
+    ctx.font = '11px Orbitron, Segoe UI, sans-serif';
     ctx.fillStyle = '#e6f1ff';
     ctx.fillText(`KNOWLEDGE ENERGY ${Math.floor(abilities.energy)}/${abilities.maxEnergy}`, left, baseY - 8);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
@@ -692,9 +727,9 @@ export class GameEngine {
         ctx.fillRect(x, y, 48, 40 * (info.cooldownLeft / info.cooldown));
       }
       ctx.fillStyle = info ? '#e6f1ff' : '#55617a';
-      ctx.font = 'bold 12px Segoe UI, sans-serif';
+      ctx.font = 'bold 12px Orbitron, Segoe UI, sans-serif';
       ctx.fillText(String(slot), x + 4, y + 13);
-      ctx.font = '9px Segoe UI, sans-serif';
+      ctx.font = '9px Orbitron, Segoe UI, sans-serif';
       if (info) {
         ctx.fillStyle = info.color;
         ctx.fillText(info.short, x + 16, y + 13);
@@ -727,7 +762,7 @@ export class GameEngine {
     ctx.fillRect(x + width / 3, y - 2, 2, 16);
     ctx.fillRect(x + (width * 2) / 3, y - 2, 2, 16);
     ctx.textAlign = 'center';
-    ctx.font = 'bold 13px Segoe UI, sans-serif';
+    ctx.font = 'bold 13px Orbitron, Segoe UI, sans-serif';
     ctx.fillText(`MOTHERSHIP · PHASE ${boss.phase}/3`, WORLD_WIDTH / 2, y - 6);
     ctx.restore();
   }
@@ -739,7 +774,7 @@ export class GameEngine {
     ctx.fillStyle = '#f72585';
     ctx.shadowColor = '#f72585';
     ctx.shadowBlur = 20;
-    ctx.font = 'bold 44px Segoe UI, sans-serif';
+    ctx.font = 'bold 44px Orbitron, Segoe UI, sans-serif';
     ctx.fillText(this.alert.text, WORLD_WIDTH / 2, WORLD_HEIGHT / 2);
     ctx.restore();
   }
@@ -752,11 +787,11 @@ export class GameEngine {
     ctx.fillStyle = '#39f3c4';
     ctx.shadowColor = '#39f3c4';
     ctx.shadowBlur = 20;
-    ctx.font = 'bold 54px Segoe UI, sans-serif';
+    ctx.font = 'bold 54px Orbitron, Segoe UI, sans-serif';
     ctx.fillText(this.banner.title, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 10);
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#e6f1ff';
-    ctx.font = '22px Segoe UI, sans-serif';
+    ctx.font = '22px Orbitron, Segoe UI, sans-serif';
     ctx.fillText(this.banner.subtitle, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 + 28);
     ctx.restore();
   }

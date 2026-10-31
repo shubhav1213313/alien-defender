@@ -110,6 +110,18 @@ not impossible.
   (fans/aimed shots → spreads + escorts → spiral + bullet curtains with a
   guaranteed safe gap).
 
+## Look and feel
+
+Neon sci-fi interface (`public/css/theme.css`): Orbitron and Rajdhani
+fonts (Google Fonts, falling back to Segoe UI offline), an animated CSS
+starfield behind the page, glass panels, glowing gradient buttons and a
+gradient logo. In the game canvas: nebulae and twinkling parallax stars, a
+curved **Earth horizon** with continents and drifting clouds
+(`public/js/game/EarthRenderer.js`), and Earth's energy-shield arc - cyan
+when healthy, red when low, flickering whenever an alien gets through. A
+pulsing red vignette warns when the hull is low. Animations respect the
+"reduce motion" accessibility setting.
+
 ## Knowledge Challenges (Banana API)
 
 There is **no Upgrade Bay** in this game. Between waves the only screen
