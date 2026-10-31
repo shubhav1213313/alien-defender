@@ -1,16 +1,18 @@
-const { describeArena, FINAL_WAVE } = require('../services/arenaRules');
+const { describeChallenge, validWave, KINDS } = require('../services/arenaRules');
 const { ChallengeError } = require('../services/challengeService');
 
 // Translates HTTP requests into ChallengeService calls. Validation of the
 // request shape happens here; game rules live in the service.
-function parseWave(value) {
-  const wave = Number(value);
-  if (!Number.isInteger(wave) || wave < 1 || wave > FINAL_WAVE) {
-    throw new ChallengeError(`wave must be an integer from 1 to ${FINAL_WAVE}`, 400);
-  }
-  return wave;
+function parseKindAndWave(kindValue, waveValue) {
+  const kind = kindValue === undefined ? 'wave' : kindValue;
+  if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) throw new ChallengeError('kind must be wave, bonus or special', 400);
+  const wave = Number(waveValue);
+  if (!Number.isInteger(wave) || !validWave(kind, wave)) throw new ChallengeError(`wave must be valid for a ${kind} challenge`, 400);
+  return { kind, wave };
 }
 
+// Answers are single digits 0-9 (the Banana API's solution range); a few
+// extra digits are accepted so a wrong answer is marked wrong, not rejected.
 function parseAnswer(body) {
   const questionIndex = Number(body.questionIndex);
   if (!Number.isInteger(questionIndex) || questionIndex < 0) {
@@ -21,7 +23,7 @@ function parseAnswer(body) {
     answer = null; // treated as "time ran out / no answer"
   } else {
     answer = String(answer).trim();
-    if (!/^\d{1,3}$/.test(answer)) throw new ChallengeError('answer must be a whole number from 0 to 999', 400);
+    if (!/^\d{1,3}$/.test(answer)) throw new ChallengeError('answer must be a whole number from 0 to 9', 400);
     answer = Number(answer);
   }
   return { questionIndex, answer };
@@ -29,23 +31,29 @@ function parseAnswer(body) {
 
 const requester = (req) => (req.session && req.session.userId) || null;
 
-// `scores` (optional) links arenas to a logged-in player's game and records
-// results in MySQL. Without it (or for guests) arenas still work.
+// `scores` (optional) links challenges to a logged-in player's game and
+// records results in MySQL. Without it (or for guests) challenges still work.
 function createChallengeController(service, { scores, logger = console } = {}) {
   return {
     rules(req, res) {
-      res.json({ success: true, data: describeArena(parseWave(req.query.wave)) });
+      const { kind, wave } = parseKindAndWave(req.query.kind, req.query.wave);
+      res.json({ success: true, data: describeChallenge(kind, wave) });
     },
 
     async create(req, res) {
       const body = req.body || {};
+      const { kind, wave } = parseKindAndWave(body.kind, body.wave);
       const userId = requester(req);
       let gameSessionId = null;
-      // Only the owner of an unfinished game can attach an arena to it.
+      let difficulty = body.difficulty === undefined ? 'normal' : body.difficulty;
+      // Only the owner of an unfinished game can attach a challenge to it,
+      // and then the SAVED game's difficulty is used, not the browser's.
       if (userId && scores && body.gameSessionId !== undefined && body.gameSessionId !== null) {
-        gameSessionId = (await scores.ownedOpenSession(userId, body.gameSessionId)).id;
+        const session = await scores.ownedOpenSession(userId, body.gameSessionId);
+        gameSessionId = session.id;
+        difficulty = session.difficulty;
       }
-      const arena = service.createArena({ wave: parseWave(body.wave), difficulty: body.difficulty, userId, gameSessionId });
+      const arena = service.createArena({ kind, wave, difficulty, userId, gameSessionId });
       res.status(201).json({ success: true, data: arena });
     },
 
@@ -71,7 +79,7 @@ function createChallengeController(service, { scores, logger = console } = {}) {
       if (arena.userId && scores) {
         try {
           await scores.recordArena({
-            userId: arena.userId, gameSessionId: arena.gameSessionId, wave: reward.wave,
+            userId: arena.userId, gameSessionId: arena.gameSessionId, kind: reward.kind, wave: reward.wave,
             difficulty: reward.difficulty, correct: reward.correct, total: reward.total,
           });
         } catch (err) {

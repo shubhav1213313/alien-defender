@@ -80,13 +80,14 @@ describe('PuzzleService fallback', () => {
     expect(service.lastStatus).toMatchObject({ source: 'banana', latencyMs: 321, error: null });
   });
 
-  test.each(['TIMEOUT', 'NETWORK', 'HTTP_ERROR', 'INVALID_RESPONSE'])('falls back to an offline puzzle on %s', async (code) => {
+  // No fabricated puzzles: an outage is reported honestly as 503 so the
+  // player can Retry or continue without the ability.
+  test.each(['TIMEOUT', 'NETWORK', 'HTTP_ERROR', 'INVALID_RESPONSE'])('reports %s as PUZZLE_API_UNAVAILABLE (no fake puzzle)', async (code) => {
     const service = new PuzzleService({ fetchPuzzle: async () => { throw new BananaApiError('fail', code); }, logger: quietLogger });
-    const puzzle = await service.getPuzzle();
-    expect(puzzle.source).toBe('offline');
-    expect(puzzle.fallbackReason).toBe(code);
-    expect(puzzle.image).toMatch(/^data:image\/svg\+xml;base64,/);
-    expect(Number.isInteger(puzzle.solution)).toBe(true);
-    expect(service.lastStatus).toMatchObject({ source: 'offline', error: code });
+    await expect(service.getPuzzle()).rejects.toMatchObject({
+      status: 503, expose: true, code: 'PUZZLE_API_UNAVAILABLE', reason: code,
+      message: expect.stringMatching(/Retry, or continue without the ability/),
+    });
+    expect(service.lastStatus).toMatchObject({ source: 'banana', error: code });
   });
 });

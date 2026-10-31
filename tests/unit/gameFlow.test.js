@@ -62,7 +62,7 @@ describe('Wave flow, Earth shield and end conditions', () => {
     engine.update(0.016);
     expect(engine.score).toBe(scoreAfterKill + 500);
     expect(engine.state.state).toBe(GameState.QUIZ);
-    expect(arenaOpen).toHaveBeenCalledWith({ wave: 1, postBoss: false, nextWave: 2 });
+    expect(arenaOpen).toHaveBeenCalledWith({ kind: 'wave', wave: 1, postBoss: false, nextWave: 2 });
     // Finishing the arena leads to the next wave banner.
     engine.finishArena();
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
@@ -110,7 +110,7 @@ describe('Wave flow, Earth shield and end conditions', () => {
     engine.boss.phaseShield = 0;
     engine.hitEnemy(engine.boss, engine.boss.health);
     expect(engine.state.state).toBe(GameState.QUIZ);
-    expect(arenaOpen).toHaveBeenLastCalledWith({ wave: 5, postBoss: true, nextWave: null });
+    expect(arenaOpen).toHaveBeenLastCalledWith({ kind: 'bonus', wave: 5, postBoss: true, nextWave: null });
     expect(engine.enemies.filter((e) => e.alive)).toHaveLength(0);
     expect(engine.projectiles.some((p) => p.owner === 'enemy')).toBe(false);
     expect(victory).not.toHaveBeenCalled();

@@ -5,7 +5,7 @@ mathematics puzzles. Built for **CIS046-3 Software for Enterprise**.
 
 > **Status:** in development. Complete so far: foundation, combat engine,
 > five enemy types, waves/difficulty/scoring, three-phase boss, Knowledge
-> Challenge Arena (Banana API), MySQL accounts with saved scores,
+> Challenges (Banana API, compulsory 2-puzzle quiz after each wave + optional VOID STORM puzzle), MySQL accounts with saved scores,
 > leaderboard and achievements, ZenQuotes as a second API, an admin
 > dashboard with role-based access control, and CSRF protection.
 > Still to come: audio, touch controls and final polish.
@@ -75,9 +75,9 @@ Motivational quotes on the menu, game-over and victory screens come from
 - **Profile**: games played, high score, aliens destroyed, boss victories,
   quiz accuracy, shot accuracy, best combo, recent games, trophy showcase.
 - **Global leaderboard**: each player's best score, filterable by difficulty.
-- **10 achievements** unlocked by real events and stored in MySQL: First
+- **11 achievements** unlocked by real events and stored in MySQL: First
   Blood, Alien Hunter, Wave Survivor, Boss Slayer, First Victory, Combo
-  Master, Perfect Quiz, Knowledge Master, Hardened Defender, Legendary Defender.
+  Master, Perfect Quiz, Knowledge Master, Hardened Defender, Legendary Defender, Storm Caller.
 
 ### What the server does not trust
 
@@ -85,7 +85,7 @@ Motivational quotes on the menu, game-over and victory screens come from
 |---|---|
 | Who the player is | Signed session cookie → MySQL session |
 | Play duration | Server timestamps (`game_sessions.started_at`) |
-| Arena score | `quiz_attempts`, written by the server when rewards are claimed |
+| Quiz score | `quiz_attempts`, written by the server when rewards are claimed |
 | Score, kills, combo… | Sent by the browser → type/range checks + plausibility checks against server-measured time (`422` if impossible) |
 | Duplicate submissions | `finished_at IS NULL` condition inside a transaction (`409`) |
 
@@ -110,47 +110,60 @@ not impossible.
   (fans/aimed shots → spreads + escorts → spiral + bullet curtains with a
   guaranteed safe gap).
 
-## Knowledge Challenge Arena (Banana API)
+## Knowledge Challenges (Banana API)
 
-After **every wave** the game pauses and the arena opens automatically. It
-cannot be skipped, but it never blocks progress: once all four questions
-have been attempted, the next wave starts whatever the score.
+There is **no Upgrade Bay** in this game. Between waves the only screen
+is the compulsory Banana quiz.
 
-1. Choose puzzle difficulty (Easy / Normal / Hard).
-2. Solve **four** real puzzles from Marc Conrad's Banana API.
-3. One scored answer per puzzle; wrong answers reveal the solution.
-4. Rewards are calculated **on the server** and applied once.
+**Compulsory quiz after waves 1, 2, 3 and 4.** The moment the last alien
+of a wave is gone, enemy spawning and combat stop and the quiz opens
+automatically. It cannot be skipped (pause, Enter and ability keys do
+nothing), but it never blocks progress:
 
-**Honesty note:** the Banana API has no difficulty parameter (verified:
-only `out` and `base64` exist), so every mode gets the same kind of puzzle.
-Difficulty is game-side and shown to the player:
+1. Instructions and the reward preview, e.g. **"SOLVE BOTH PUZZLES TO
+   UNLOCK PLASMA SHIELD"**.
+2. **Two** genuine Marc Conrad Banana API puzzles, shown unmodified.
+3. Answer with the **0–9 buttons** (or number keys); one answer per
+   puzzle, 45 s each, one honest hint per puzzle (parity and range - never
+   the answer). Wrong answers show the solution.
+4. **2/2** unlocks that wave's ability; **0/2 or 1/2** unlocks nothing.
+   Either way the next wave starts.
 
-| Mode | Time per puzzle | Hints | Perfect (4/4) reward |
-|---|---|---|---|
-| Easy | 60 s | 1 per puzzle (parity + range) | Standard ability, +30 energy |
-| Normal | 35 s | none | **Enhanced** ability (+50% duration/power, −25% cost), +35 energy |
-| Hard | 20 s | none | **Elite** ability, +40 energy |
+| After wave | Ability (key) | Effect | Energy | Cooldown |
+|---|---|---|---|---|
+| 1 | **Plasma Shield** (1) | 6 s barrier: no damage, enemy bullets touching it are destroyed | 20 | 18 s |
+| 2 | **Hyper Blaster** (2) | 8 s: 2.5x fire rate and double damage | 25 | 16 s |
+| 3 | **Triple Beam** (3) | 10 s: every shot splits into three | 25 | 16 s |
+| 4 | **EMP Shockwave** (4) | Clears enemy bullets, 4 damage to all aliens (15 to the boss), 2 s stun | 35 | 22 s |
+| special | **VOID STORM** (5) | 6 s lightning: up to 3 aliens struck every 0.4 s (3 damage; 2 to the boss) | 50 | 40 s |
 
-Reward tiers (cumulative): **0/4** nothing (continue normally) · **1/4** +10
-energy · **2/4** +20 energy & +15 hull · **3/4** + standard ability ·
-**4/4** stronger ability by difficulty (+25 hull).
+Each correct answer gives **+15 Knowledge Energy** (+30 for the special
+puzzle), which abilities spend. The HUD shows every slot with its key,
+cost (red if unaffordable), cooldown and remaining effect time.
 
-| After wave | Standard ability (key) | Hard-perfect elite ability |
-|---|---|---|
-| 1 | Mini Shield (1) | Ghost Mode – immune for 5 s |
-| 2 | Rapid Fire (2) | Phantom Overdrive – invisible, invulnerable, rapid fire |
-| 3 | Triple Laser (3) | Time Freeze + Triple Laser |
-| 4 | EMP Blast (4) | Ultimate Nova |
-| Boss | Victory bonus: points + energy; leftover energy → score; perfect Hard = **Legendary Defender** | |
+**Optional special puzzle.** Sometimes during a normal wave a small
+right-side notice appears: *"⚡ SPECIAL PUZZLE AVAILABLE! Solve one hard
+puzzle to unlock VOID STORM!"*. It is clickable for **4 seconds** (with a
+countdown); ignoring it changes nothing. Clicking pauses combat for **one**
+Banana puzzle (20 s, no hint); correct unlocks VOID STORM, otherwise you go
+straight back to the same wave. At most one invitation per wave, none
+during the boss fight, never again once VOID STORM is owned, and an open
+invitation is withdrawn when the wave ends - it can never replace the
+compulsory quiz. VOID STORM cannot kill the boss on its own (a full storm
+deals well under 20% of its health; verified by a test).
 
-Abilities cost Knowledge Energy, have cooldowns, stay unlocked for the
-rest of the game and are only ever upgraded. The full game is winnable
-with **no** abilities (verified by an automated full-game test at 0/4).
+**After the boss:** the *Victory Bonus Challenge* (two puzzles for bonus
+points; 2/2 on a Hard game earns **Legendary Defender**), then the victory
+screen. Leftover Knowledge Energy is converted into points.
 
-**Resilience:** 4 s timeout on Banana API calls; on timeout, network
-error, HTTP error or an invalid response the server serves a clearly
-labelled **OFFLINE PUZZLE** instead. If the game server itself is
-unreachable, the arena offers *Try again* or *Continue without rewards*.
+**Honesty notes:** the Banana API has no difficulty parameter (verified:
+only `out` and `base64` exist) - the special puzzle is "hard" only because
+of the shorter time and no hint, and the screen says so. There are **no
+fabricated puzzles**: if the Banana API times out (4 s) or fails, the
+server answers `503 PUZZLE_API_UNAVAILABLE` and the screen offers
+**Retry** or **Continue without ability**, so the game can never get stuck.
+The whole game is winnable with no abilities at all (automated full-game
+test answering 0/2 every time).
 
 ## Technology stack
 
@@ -224,7 +237,7 @@ alienn-defender/
 ### Database tables
 
 `users` · `game_sessions` (one per game started) · `scores` (one result
-per session) · `quiz_attempts` (arena results) · `achievements` (catalogue)
+per session) · `quiz_attempts` (quiz results, with kind wave/bonus/special) · `achievements` (catalogue)
 · `user_achievements` · `sessions` (login sessions) · `schema_migrations`.
 Foreign keys use `ON DELETE CASCADE`, so deleting a user removes their
 games, scores, quiz attempts and trophies.
@@ -235,9 +248,11 @@ games, scores, quiz attempts and trophies.
 |---|---|
 | W A S D / Arrow keys | Move |
 | Space | Shoot (hold) |
-| 1 2 3 4 | Activate unlocked abilities |
-| P / Esc | Pause / resume (not available inside the arena) |
-| Enter | Start a game; submit a puzzle answer in the arena |
+| 1 2 3 4 5 | Activate unlocked abilities (5 = VOID STORM) |
+| 0–9 | Answer the puzzle on screen |
+| Mouse click | Accept the "SPECIAL PUZZLE AVAILABLE" invitation (4 s) |
+| P / Esc | Pause / resume (not available during a quiz) |
+| Enter | Start a game from the menu or end screens |
 
 ## API endpoints
 
@@ -261,16 +276,16 @@ games, scores, quiz attempts and trophies.
 | GET | `/api/achievements` | none | Achievement catalogue |
 | GET | `/api/quotes/random` | none | `?context=menu\|gameover\|victory` → `{ quote, author, source: "zenquotes"\|"fallback", stale, attribution }` |
 | GET | `/api/status` | none | Last measured status/latency of the Banana and ZenQuotes APIs |
-| GET | `/api/challenges/rules?wave=N` | none | Difficulty rules, reward table, abilities on offer |
-| POST | `/api/challenges` | none* | `{ wave, difficulty, gameSessionId? }` → new arena (rate limited: 20/min) |
-| GET | `/api/challenges/:id` | none* | Arena progress |
-| GET | `/api/challenges/:id/question` | none* | Current puzzle image, source, latency (never the solution) |
+| GET | `/api/challenges/rules?kind=K&wave=N` | none | `kind` = `wave` (waves 1-4), `bonus` (5) or `special`: puzzle count, time, hint rule, reward preview |
+| POST | `/api/challenges` | none* | `{ kind, wave, difficulty?, gameSessionId? }` → new challenge (rate limited: 20/min) |
+| GET | `/api/challenges/:id` | none* | Challenge progress |
+| GET | `/api/challenges/:id/question` | none* | Current genuine Banana puzzle image + latency (never the solution); `503 PUZZLE_API_UNAVAILABLE` if the API is down |
 | POST | `/api/challenges/:id/answer` | none* | `{ questionIndex, answer }` → correct?, solution revealed; 409 on duplicates |
-| POST | `/api/challenges/:id/hint` | none* | Easy only, once per puzzle (403 otherwise) |
-| POST | `/api/challenges/:id/claim` | none* | Server-calculated rewards, once per arena (409 on repeat) |
+| POST | `/api/challenges/:id/hint` | none* | Once per puzzle; 403 on the special puzzle |
+| POST | `/api/challenges/:id/claim` | none* | Server-calculated rewards, once per challenge (409 on repeat) |
 
 \* Arenas are identified by an unguessable random id and kept in server
-memory for 30 minutes. A logged-in player's arena is visible only to that
+memory for 30 minutes. A logged-in player's challenge is visible only to that
 player (others get 404), and its result is written to `quiz_attempts`.
 `401` responses carry `code: "AUTH_REQUIRED"` or `"SESSION_EXPIRED"`;
 `403` responses carry `code: "FORBIDDEN"` (role) or `"CSRF_INVALID"`.
@@ -297,6 +312,12 @@ different folder) is using port 3000. `npm start` now refuses to start in
 that case and prints `ERROR: port 3000 is already in use ...`. Stop the
 other server (Ctrl+C in its terminal, or end its `node.exe` in Task
 Manager), or set a different `PORT` in `.env`.
+
+**You see an "Upgrade Bay", a "Knowledge Terminal" or a "Puzzle (Q)"
+button.** None of these exist in this project - you are looking at an
+older, different copy of the game (for example the `alien defender`
+folder) that is still running on the same port. Stop it and start this
+project with `npm start`; `/api/health` must show `"app":"alienn-defender"`.
 
 **`npm start` says it cannot connect to MySQL.** Check the MySQL80 service
 is running and `DB_USER` / `DB_PASSWORD` in `.env`; run `npm run db:migrate`

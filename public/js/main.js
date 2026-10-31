@@ -3,6 +3,7 @@ import { InputHandler } from './game/InputHandler.js';
 import { GameEngine } from './game/GameEngine.js';
 import { getDifficulty } from './game/DifficultySettings.js';
 import { KnowledgeArena } from './ui/KnowledgeArena.js';
+import { SpecialOffer } from './ui/SpecialOffer.js';
 import { Panels } from './ui/Panels.js';
 import { AccountUI } from './ui/AccountUI.js';
 import { ProfileView, LeaderboardView } from './ui/PlayerViews.js';
@@ -40,9 +41,16 @@ const apiStatus = new ApiStatusIndicator({ bus, element: document.getElementById
 quotes.load('menu');
 apiStatus.refresh();
 
-// The arena listens for 'arena:open' and drives the puzzle screens. Arena
-// results are linked to the saved game for logged-in players.
-new KnowledgeArena({ engine, root: document.getElementById('screen-arena'), getGameSessionId: () => recorder.gameSessionId });
+// The Knowledge Challenge listens for 'arena:open' (after waves 1-4, after
+// the boss, or when the special invitation is accepted) and drives the
+// puzzle screens. Results are linked to the saved game for logged-in players.
+new KnowledgeArena({
+  engine,
+  root: document.getElementById('screen-arena'),
+  getGameSessionId: () => recorder.gameSessionId,
+  getDifficulty: () => engine.difficulty.id,
+});
+new SpecialOffer({ engine, element: document.getElementById('special-offer') });
 
 const selectedDifficulty = () => document.querySelector('input[name="difficulty"]:checked').value;
 const startGame = () => {

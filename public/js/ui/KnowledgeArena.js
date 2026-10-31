@@ -2,114 +2,94 @@ import { apiRequest } from '../api/apiClient.js';
 import { ABILITIES } from '../game/AbilityDefinitions.js';
 import { el } from './dom.js';
 
-// Knowledge Challenge Arena UI.
-// Flow: intro (choose difficulty) -> 4 x (puzzle -> feedback) -> results.
-// The server holds the answers and calculates rewards; this class only
-// displays them and hands the rewards to the engine. If the server cannot be
-// reached the player is offered "continue without rewards", so the arena can
-// never trap the game.
-
-const TIER_LABEL = { standard: 'Standard', enhanced: 'Enhanced', elite: 'ELITE' };
+// Knowledge Challenge screen (Banana API puzzles).
+//   wave    - compulsory after waves 1-4: 2 puzzles, 2/2 unlocks the ability
+//   bonus   - Victory Bonus Challenge after the boss: 2 puzzles for points
+//   special - optional VOID STORM puzzle: 1 puzzle, 20 s, no hint
+// Flow: instructions + reward preview -> puzzle(s) with 0-9 buttons ->
+// feedback -> result. The server holds the answers and calculates rewards.
+// If the Banana API (or our server) is unavailable the player can Retry or
+// Continue without the ability, so the game can never get stuck.
 const ACHIEVEMENT_NAMES = { legendary_defender: 'Legendary Defender' };
+const TITLES = { wave: 'Knowledge Challenge', bonus: 'Victory Bonus Challenge', special: '⚡ Special Puzzle' };
 
-function abilityLabel(ability) {
-  const def = ABILITIES[ability.id];
-  return `${def.name} (${TIER_LABEL[ability.tier]}) - key ${def.slot}`;
-}
-
-// Human-readable list of what a reward object grants.
 export function describeReward(reward) {
   const items = [];
+  if (reward.ability) items.push(`Unlocked ${ABILITIES[reward.ability.id].name} - press ${ABILITIES[reward.ability.id].slot} in combat`);
   if (reward.energy) items.push(`+${reward.energy} Knowledge Energy`);
-  if (reward.repair) items.push(`+${reward.repair} hull repair`);
-  if (reward.ability) items.push(`Unlock ${abilityLabel(reward.ability)}`);
   if (reward.scoreBonus) items.push(`+${reward.scoreBonus.toLocaleString()} bonus points`);
   for (const id of reward.achievements || []) items.push(`Achievement: ${ACHIEVEMENT_NAMES[id] || id}`);
-  return items.length ? items : ['No reward'];
+  return items.length ? items : ['No reward this time'];
 }
 
 export class KnowledgeArena {
-  // getGameSessionId: returns the saved game's id for logged-in players, so
-  // the server can record arena results against that game (null for guests).
-  constructor({ engine, root, api = apiRequest, getGameSessionId = () => null }) {
+  // getGameSessionId: the saved game's id for logged-in players (server
+  // records results against it). getDifficulty: the current game difficulty.
+  constructor({ engine, root, api = apiRequest, getGameSessionId = () => null, getDifficulty = () => 'normal', keyTarget = document }) {
     this.engine = engine;
     this.root = root;
     this.api = api;
     this.getGameSessionId = getGameSessionId;
+    this.getDifficulty = getDifficulty;
     this.title = root.querySelector('[data-arena="title"]');
     this.subtitle = root.querySelector('[data-arena="subtitle"]');
     this.body = root.querySelector('[data-arena="body"]');
     this.timer = null;
+    this.answerable = false;
     engine.bus.on('arena:open', (info) => this.open(info));
+    // Number keys 0-9 answer the puzzle on screen.
+    keyTarget.addEventListener('keydown', (e) => {
+      if (!this.answerable || this.root.hidden || !/^[0-9]$/.test(e.key)) return;
+      e.preventDefault();
+      this.submit(Number(e.key));
+    });
   }
 
-  // ---- Intro: difficulty choice ---------------------------------------------
+  // ---- Intro: instructions and reward preview -------------------------------
 
-  async open({ wave, postBoss, nextWave }) {
-    this.wave = wave;
-    this.postBoss = postBoss;
-    this.nextWave = nextWave;
-    this.arena = null;
-    this.reward = null;
-    this.busy = false;
-    this.correctSoFar = 0;
-    this.title.textContent = postBoss ? 'Victory Bonus Challenge' : 'Knowledge Challenge Arena';
-    this.subtitle.textContent = postBoss
-      ? 'The Mothership is destroyed. Four final puzzles for bonus points.'
-      : `Wave ${wave} cleared. Solve four Banana puzzles before Wave ${nextWave}.`;
-    this.showLoading('Loading challenge rules…');
+  async open({ kind = 'wave', wave, nextWave }) {
+    Object.assign(this, { kind, wave, nextWave, arena: null, reward: null, busy: false, correctSoFar: 0, answerable: false });
+    this.title.textContent = TITLES[kind];
+    this.subtitle.textContent = kind === 'wave'
+      ? `Wave ${wave} cleared! Combat is paused. Solve the Banana puzzles before Wave ${nextWave}.`
+      : kind === 'bonus'
+        ? 'The Mothership is destroyed. Two final puzzles for bonus points.'
+        : 'Combat is paused while you solve this puzzle.';
+    this.showLoading('Loading challenge…');
     try {
-      this.rules = await this.api(`/api/challenges/rules?wave=${wave}`);
+      this.rules = await this.api(`/api/challenges/rules?kind=${kind}&wave=${wave}`);
       this.renderIntro();
     } catch (err) {
-      this.showError(err.message, () => this.open({ wave, postBoss, nextWave }));
+      this.showError(err.message, () => this.open({ kind, wave, nextWave }));
     }
   }
 
   renderIntro() {
     const { rules } = this;
-    const cards = rules.difficulties.map((d, i) => {
-      const perfect = d.rewardTable[4];
-      return el('label', { class: 'arena-card' },
-        el('input', { type: 'radio', name: 'arena-difficulty', value: d.id, checked: i === 1 }),
-        el('span', {},
-          el('strong', {}, d.label),
-          el('small', {}, `${d.timeLimitSeconds}s per puzzle · ${d.hintsAllowed ? '1 hint per puzzle' : 'no hints'}`),
-          el('small', { class: 'perfect' }, `4/4: ${describeReward(perfect).join(', ')}`)));
-    });
-
-    const tierRows = ['0/4', '1/4', '2/4', '3/4'].map((label, correct) =>
-      el('li', {}, el('b', {}, `${label}: `), describeReward(rules.difficulties[1].rewardTable[correct]).join(', ')));
-
-    const abilityInfo = rules.abilities
-      ? el('p', { class: 'arena-abilities' },
-        `Ability on offer: ${ABILITIES[rules.abilities.standard].name} (3/4 or better). `,
-        `Perfect Hard run: ${ABILITIES[rules.abilities.elite].name} - ${ABILITIES[rules.abilities.elite].description}`)
-      : el('p', { class: 'arena-abilities' }, 'No more waves: rewards are bonus points. A perfect Hard run earns Legendary Defender.');
-
-    const start = el('button', { class: 'btn primary', type: 'button', onclick: () => {
-      const choice = this.body.querySelector('input[name="arena-difficulty"]:checked').value;
-      this.start(choice);
-    } }, 'Begin Challenge');
-
+    const ability = rules.ability ? ABILITIES[rules.ability.id] : null;
+    const start = el('button', { class: 'btn primary', type: 'button', onclick: () => this.start() },
+      rules.questions === 1 ? 'Show the puzzle' : 'Start the quiz');
     this.body.replaceChildren(
-      el('p', { class: 'arena-rules' }, 'Four puzzles. One answer each. Wrong answers show the solution and move on - you always continue to the next stage.'),
-      el('fieldset', { class: 'arena-difficulty' }, el('legend', {}, 'Choose puzzle difficulty'), cards),
-      abilityInfo,
-      el('details', { class: 'arena-tiers' }, el('summary', {}, 'Reward tiers'), el('ul', {}, tierRows)),
+      el('p', { class: 'reward-preview' }, rules.preview),
+      ability ? el('p', { class: 'arena-abilities' }, `${ability.name} (key ${ability.slot}, ${ability.cost} energy): ${ability.description}`) : null,
+      el('ol', { class: 'arena-instructions' },
+        el('li', {}, 'Each picture is a real Banana puzzle: work out the number hidden behind the banana.'),
+        el('li', {}, 'Answer with the 0-9 buttons or your keyboard. You get ONE answer per puzzle.'),
+        el('li', {}, `You have ${rules.timeLimitSeconds} seconds per puzzle.${rules.hintsAllowed ? ' Stuck? Use the hint button once per puzzle.' : ''}`),
+        el('li', {}, `Every correct answer also gives +${rules.energyPerCorrect} Knowledge Energy for using abilities.`),
+        rules.kind === 'wave' ? el('li', {}, 'Whatever your score, the next wave starts afterwards.') : null),
       el('p', { class: 'arena-note' }, rules.note),
       start,
     );
     start.focus();
   }
 
-  async start(difficulty) {
+  async start() {
     if (this.busy) return;
     this.busy = true;
-    this.difficulty = this.rules.difficulties.find((d) => d.id === difficulty);
-    this.showLoading('Opening the arena…');
+    this.showLoading('Opening the challenge…');
     try {
-      const body = { wave: this.wave, difficulty };
+      const body = { kind: this.kind, wave: this.wave, difficulty: this.getDifficulty() };
       const gameSessionId = this.getGameSessionId();
       if (gameSessionId) body.gameSessionId = gameSessionId;
       this.arena = await this.api('/api/challenges', { method: 'POST', body });
@@ -117,14 +97,14 @@ export class KnowledgeArena {
       await this.loadQuestion();
     } catch (err) {
       this.busy = false;
-      this.showError(err.message, () => this.start(difficulty));
+      this.showError(err.message, () => this.start());
     }
   }
 
   // ---- Questions -----------------------------------------------------------
 
   async loadQuestion() {
-    this.showLoading('Fetching puzzle from the Banana API…');
+    this.showLoading('Fetching a puzzle from the Banana API…');
     try {
       this.question = await this.api(`/api/challenges/${this.arena.arenaId}/question`);
       this.renderQuestion();
@@ -135,40 +115,31 @@ export class KnowledgeArena {
 
   renderQuestion() {
     const q = this.question;
-    const live = q.source === 'banana';
-    const badge = live
-      ? el('span', { class: 'badge live' }, `Live Banana API · ${q.latencyMs} ms`)
-      : el('span', { class: 'badge offline' }, `OFFLINE PUZZLE · Banana API unavailable (${q.fallbackReason})`);
-
-    const input = el('input', {
-      type: 'text', inputmode: 'numeric', pattern: '[0-9]*', maxlength: '3', autocomplete: 'off',
-      'aria-label': 'Your answer', placeholder: '?', class: 'arena-answer', required: true,
-    });
-    const submit = el('button', { class: 'btn primary', type: 'submit' }, 'Submit');
+    const buttons = Array.from({ length: 10 }, (_, digit) => el('button', {
+      class: 'digit', type: 'button', 'data-digit': digit, 'aria-label': `Answer ${digit}`,
+      onclick: () => this.submit(digit),
+    }, String(digit)));
     const hintText = el('p', { class: 'arena-hint', 'aria-live': 'polite' });
     const hintButton = q.hintAvailable
-      ? el('button', { class: 'btn', type: 'button', onclick: () => this.useHint(hintButton, hintText) }, 'Use hint')
+      ? el('button', { class: 'btn small', type: 'button', onclick: () => this.useHint(hintButton, hintText) }, 'Show a hint')
       : null;
-
-    const form = el('form', { class: 'arena-form', onsubmit: (e) => {
-      e.preventDefault();
-      if (/^\d{1,3}$/.test(input.value.trim())) this.submit(input.value.trim());
-    } }, input, submit, hintButton);
-
     this.timerBar = el('div', { class: 'arena-timer-fill' });
     this.timerText = el('span', { class: 'arena-timer-text' });
 
     this.body.replaceChildren(
       el('div', { class: 'arena-progress' },
-        el('strong', {}, `QUESTION ${q.questionNumber}/${q.totalQuestions}`),
-        el('span', {}, `${this.difficulty.label} · ${this.correctSoFar} correct`),
-        badge),
+        el('strong', {}, `PUZZLE ${q.questionNumber} OF ${q.totalQuestions}`),
+        el('span', {}, `${this.correctSoFar} correct so far`),
+        el('span', { class: 'badge live' }, `Live Banana API · ${q.latencyMs} ms`)),
       el('div', { class: 'arena-timer' }, this.timerBar, this.timerText),
-      el('img', { class: 'arena-puzzle', src: q.image, alt: 'Banana mathematics puzzle: find the value hidden behind the banana' }),
-      form,
+      el('img', { class: 'arena-puzzle', src: q.image, alt: 'Banana mathematics puzzle: find the number hidden behind the banana' }),
+      el('p', { class: 'arena-ask' }, 'What number is hidden behind the banana?'),
+      el('div', { class: 'digit-pad', role: 'group', 'aria-label': 'Answer buttons 0 to 9' }, buttons),
+      hintButton,
       hintText,
     );
-    input.focus();
+    this.answerable = true;
+    buttons[0].focus();
     this.startTimer(q.secondsRemaining, q.timeLimitSeconds);
   }
 
@@ -201,13 +172,14 @@ export class KnowledgeArena {
     }
   }
 
-  // One submission per question: `busy` blocks double clicks / Enter spam,
+  // One submission per puzzle: `busy` blocks double clicks and key spam,
   // and the server rejects duplicates as well.
   async submit(answer) {
-    if (this.busy) return;
+    if (this.busy || !this.answerable) return;
     this.busy = true;
+    this.answerable = false;
     this.stopTimer();
-    this.body.querySelectorAll('button, input').forEach((n) => { n.disabled = true; });
+    this.body.querySelectorAll('button').forEach((n) => { n.disabled = true; });
     try {
       const result = await this.api(`/api/challenges/${this.arena.arenaId}/answer`, {
         method: 'POST', body: { questionIndex: this.question.questionIndex, answer },
@@ -217,35 +189,32 @@ export class KnowledgeArena {
       this.renderFeedback(result);
     } catch (err) {
       this.busy = false;
-      // 409 = already answered (e.g. a second tab): just move on.
+      // 409 = this puzzle was already answered (e.g. a second tab): move on.
       if (err.status === 409) this.loadQuestion();
-      else this.showError(err.message, () => this.submit(answer));
+      else this.showError(err.message, () => { this.answerable = true; this.submit(answer); });
     }
   }
 
   renderFeedback(result) {
     const heading = result.correct
       ? el('h3', { class: 'feedback correct' }, '✔ Correct!')
-      : el('h3', { class: 'feedback wrong' }, result.timedOut ? '⏱ Time ran out' : '✖ Incorrect');
+      : el('h3', { class: 'feedback wrong' }, result.timedOut ? '⏱ Time ran out' : '✖ Not quite');
     const next = el('button', { class: 'btn primary', type: 'button', onclick: () => (result.completed ? this.claim() : this.loadQuestion()) },
-      result.completed ? 'See results' : `Next question (${result.answered + 1}/4)`);
-
+      result.completed ? 'See the result' : `Next puzzle (${result.answered + 1} of ${result.totalQuestions})`);
     this.body.replaceChildren(
-      el('div', { class: 'arena-progress' }, el('strong', {}, `QUESTION ${result.answered}/4`), el('span', {}, `${result.correctCount} correct so far`)),
       heading,
-      result.correct ? null : el('p', {}, `The correct answer was ${result.correctAnswer}.`),
-      result.explanation ? el('p', { class: 'arena-note' }, result.explanation) : null,
+      result.correct ? null : el('p', {}, `The answer was ${result.correctAnswer}.`),
       next,
     );
     next.focus();
   }
 
-  // ---- Results -------------------------------------------------------------
+  // ---- Result --------------------------------------------------------------
 
   async claim() {
     if (this.busy) return;
     this.busy = true;
-    this.showLoading('Calculating rewards…');
+    this.showLoading('Checking your answers…');
     try {
       this.reward = await this.api(`/api/challenges/${this.arena.arenaId}/claim`, { method: 'POST' });
       this.engine.applyArenaRewards(this.arena.arenaId, this.reward);
@@ -259,46 +228,50 @@ export class KnowledgeArena {
 
   renderResults() {
     const { reward } = this;
-    const table = this.difficulty.rewardTable;
-    const missed = table.slice(reward.correct + 1).map((tier) =>
-      el('li', {}, el('b', {}, `${tier.correct}/4: `), describeReward(tier).join(', ')));
-
-    const continueLabel = this.postBoss ? 'See final results' : `Continue to Wave ${this.nextWave}`;
-    const button = el('button', { class: 'btn primary', type: 'button', onclick: () => this.close() }, continueLabel);
+    const abilityName = this.rules.ability ? this.rules.ability.name : null;
+    let verdict;
+    if (reward.ability) verdict = el('p', { class: 'unlock' }, `⚡ ${reward.ability.name} UNLOCKED!`);
+    else if (abilityName) verdict = el('p', { class: 'arena-note' }, `${abilityName} stays locked - ${this.kind === 'wave' ? 'you need both puzzles right' : 'the answer was not correct'}. ${this.kind === 'wave' ? 'The next wave starts as normal.' : 'Back to the battle!'}`);
+    else verdict = null;
 
     this.body.replaceChildren(
       el('p', { class: 'arena-score' }, `${reward.correct} / ${reward.total}`),
-      el('p', { class: 'arena-note' }, reward.correct === 0
-        ? 'No reward this time - but you continue to the next stage as normal.'
-        : `${this.difficulty.label} challenge complete.`),
-      el('h3', {}, 'Earned'),
+      verdict,
       el('ul', { class: 'rewards earned' }, describeReward(reward).map((t) => el('li', {}, t))),
-      missed.length ? el('h3', {}, 'Missed') : null,
-      missed.length ? el('ul', { class: 'rewards missed' }, missed) : null,
-      button,
+      el('button', { class: 'btn primary', type: 'button', onclick: () => this.close() }, this.continueLabel()),
     );
-    button.focus();
+    this.body.querySelector('button').focus();
+  }
+
+  continueLabel() {
+    if (this.kind === 'bonus') return 'See final results';
+    if (this.kind === 'special') return 'Back to the battle';
+    return `Start Wave ${this.nextWave}`;
   }
 
   close() {
     this.stopTimer();
+    this.answerable = false;
     this.engine.finishArena();
   }
 
   // ---- Shared views ----------------------------------------------------------
 
   showLoading(message) {
+    this.answerable = false;
     this.body.replaceChildren(el('div', { class: 'arena-loading' }, el('span', { class: 'spinner', 'aria-hidden': 'true' }), message));
   }
 
-  // Errors offer a retry, and always a way out so the game is never stuck.
+  // Errors offer Retry, and always a way out so the game is never stuck.
   showError(message, retry) {
     this.stopTimer();
+    this.answerable = false;
+    const leave = this.kind === 'bonus' ? 'Continue without bonus' : this.kind === 'special' ? 'Back to the battle' : 'Continue without ability';
     this.body.replaceChildren(
-      el('p', { class: 'feedback wrong' }, `Problem: ${message}`),
+      el('p', { class: 'feedback wrong' }, message),
       el('div', { class: 'arena-actions' },
-        el('button', { class: 'btn primary', type: 'button', onclick: retry }, 'Try again'),
-        el('button', { class: 'btn', type: 'button', onclick: () => this.close() }, 'Continue without rewards')),
+        el('button', { class: 'btn primary', type: 'button', onclick: retry }, 'Retry'),
+        el('button', { class: 'btn', type: 'button', onclick: () => this.close() }, leave)),
     );
   }
 }

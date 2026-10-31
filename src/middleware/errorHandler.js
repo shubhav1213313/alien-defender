@@ -14,10 +14,14 @@ function errorHandler(err, req, res, next) {
     return res.status(413).json({ success: false, error: 'Request body is too large' });
   }
   const status = err.status || err.statusCode || 500;
-  if (status >= 500) {
+  // 4xx messages are always safe; a 5xx message is only shown when the error
+  // is explicitly marked `expose` (e.g. "Banana API unavailable").
+  const safe = status < 500 || err.expose === true;
+  if (!safe) {
     console.error('[error]', err);
   }
-  const body = { success: false, error: status >= 500 ? 'Internal server error' : err.message };
+  const body = { success: false, error: safe ? err.message : 'Internal server error' };
+  if (safe && typeof err.code === 'string') body.code = err.code;
   if (status < 500 && err.details) body.details = err.details;
   return res.status(status).json(body);
 }

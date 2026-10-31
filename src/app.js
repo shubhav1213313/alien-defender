@@ -90,7 +90,13 @@ function createApp(options = {}) {
   // Only public/ is served statically - src/, database/ and .env are never
   // reachable. Static files are served before sessions so they never touch
   // the session store.
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+  // `no-cache` makes the browser revalidate (ETag) on every load, so an
+  // updated game is never hidden behind an old cached copy.
+  app.use(express.static(path.join(__dirname, '..', 'public'), {
+    setHeaders(res, filePath) {
+      if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+    },
+  }));
 
   app.use(express.json({ limit: '10kb' }));
   app.use('/api', createSessionMiddleware({

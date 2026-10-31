@@ -92,6 +92,11 @@ export class WaveManager {
     return this.waveIndex + 1 < this.waves.length;
   }
 
+  // Seconds of combat in the current wave (pauses and quizzes excluded).
+  get combatTime() {
+    return this.active ? this.timer : 0;
+  }
+
   // Fraction of this wave's enemies dealt with (destroyed or escaped).
   get progress() {
     return this.total ? (this.total - this.remaining) / this.total : 0;

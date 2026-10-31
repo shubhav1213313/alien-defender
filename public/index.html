@@ -39,7 +39,7 @@
           <button class="btn small" data-panel="admin" data-requires-admin hidden>Admin Dashboard</button>
           <button class="btn small" data-panel="auth" data-guest-only>Log in / Register</button>
         </div>
-        <p class="controls">WASD / Arrows: move · Space: shoot · 1–4: abilities · P / Esc: pause · Enter: start</p>
+        <p class="controls">WASD / Arrows: move · Space: shoot · 1–5: abilities · P / Esc: pause · Enter: start</p>
         <figure class="quote" data-quote="menu" aria-live="polite"></figure>
       </section>
 
@@ -49,10 +49,18 @@
         <button id="btn-quit" class="btn">Quit to Menu</button>
       </section>
 
-      <!-- Knowledge Challenge Arena: opens automatically after every wave. -->
+      <!-- Optional special puzzle invitation: clickable for 4 seconds during combat. -->
+      <button id="special-offer" class="special-offer" type="button" hidden disabled>
+        <strong>⚡ SPECIAL PUZZLE AVAILABLE!</strong>
+        <span>Solve one hard puzzle to unlock VOID STORM!</span>
+        <span class="offer-countdown" data-offer-countdown>4s</span>
+      </button>
+
+      <!-- Knowledge Challenge: opens automatically after waves 1-4, after the
+           boss (bonus), and when the special invitation is accepted. -->
       <section id="screen-arena" class="overlay arena" data-state="quiz" hidden aria-labelledby="arena-title">
         <div class="arena-panel">
-          <h2 id="arena-title" data-arena="title">Knowledge Challenge Arena</h2>
+          <h2 id="arena-title" data-arena="title">Knowledge Challenge</h2>
           <p class="tagline" data-arena="subtitle"></p>
           <div data-arena="body" class="arena-body" aria-live="polite"></div>
         </div>

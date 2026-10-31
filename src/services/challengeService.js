@@ -1,23 +1,24 @@
 const crypto = require('crypto');
-const { QUESTIONS_PER_ARENA, FINAL_WAVE, DIFFICULTY_RULES, calculateRewards } = require('./arenaRules');
+const { KINDS, DIFFICULTIES, validWave, calculateRewards } = require('./arenaRules');
 
 // Seconds of network grace allowed on top of the visible time limit.
 const SUBMIT_GRACE_SECONDS = 3;
 
 class ChallengeError extends Error {
-  constructor(message, status) {
+  constructor(message, status, code) {
     super(message);
     this.name = 'ChallengeError';
     this.status = status;
+    if (code) this.code = code;
   }
 }
 
-// Runs Knowledge Challenge Arenas. Correct answers never leave the server
-// until the player has submitted. Each question accepts exactly one scored
+// Runs Knowledge Challenges. Correct answers never leave the server until
+// the player has submitted. Each question accepts exactly one scored
 // submission and rewards can be claimed exactly once.
 //
-// Arenas are kept in memory with a time-to-live. That is enough for a
-// single-server game; a database-backed store can replace it later.
+// Challenges are kept in memory with a time-to-live (single game server);
+// results of logged-in players are stored in MySQL when claimed.
 class ChallengeService {
   constructor({ puzzleProvider, now = () => Date.now(), ttlMs = 30 * 60 * 1000, idGenerator = () => crypto.randomUUID() }) {
     this.puzzles = puzzleProvider;
@@ -27,21 +28,19 @@ class ChallengeService {
     this.arenas = new Map();
   }
 
-  // userId / gameSessionId are set when a logged-in player starts the arena
-  // during a recorded game; guests' arenas have neither.
-  createArena({ wave, difficulty, userId = null, gameSessionId = null }) {
-    if (!Number.isInteger(wave) || wave < 1 || wave > FINAL_WAVE) {
-      throw new ChallengeError(`wave must be an integer from 1 to ${FINAL_WAVE}`, 400);
-    }
-    if (!Object.prototype.hasOwnProperty.call(DIFFICULTY_RULES, difficulty)) {
-      throw new ChallengeError('difficulty must be easy, normal or hard', 400);
-    }
+  // userId / gameSessionId are set when a logged-in player starts the
+  // challenge during a recorded game; guests' challenges have neither.
+  createArena({ kind = 'wave', wave, difficulty = 'normal', userId = null, gameSessionId = null }) {
+    if (!Object.prototype.hasOwnProperty.call(KINDS, kind)) throw new ChallengeError('kind must be wave, bonus or special', 400);
+    if (!Number.isInteger(wave) || !validWave(kind, wave)) throw new ChallengeError(`wave ${wave} is not valid for a ${kind} challenge`, 400);
+    if (!DIFFICULTIES.includes(difficulty)) throw new ChallengeError('difficulty must be easy, normal or hard', 400);
     this.removeExpired();
     const arena = {
       id: this.newId(),
+      kind,
       wave,
       difficulty,
-      rules: DIFFICULTY_RULES[difficulty],
+      rules: KINDS[kind],
       questions: [],
       currentIndex: 0,
       correctCount: 0,
@@ -54,8 +53,8 @@ class ChallengeService {
     return this.publicArena(arena);
   }
 
-  // A player's arena is only visible to that player (404 for anyone else,
-  // so arena ids cannot be probed). Guest arenas rely on their random id.
+  // A player's challenge is only visible to that player (404 for anyone
+  // else, so ids cannot be probed). Guest challenges rely on their random id.
   getArena(id, requesterId = null) {
     const arena = this.arenas.get(id);
     if (!arena || this.now() - arena.createdAt > this.ttlMs || (arena.userId !== null && arena.userId !== requesterId)) {
@@ -65,18 +64,18 @@ class ChallengeService {
   }
 
   isComplete(arena) {
-    return arena.currentIndex >= QUESTIONS_PER_ARENA;
+    return arena.currentIndex >= arena.rules.questions;
   }
 
   publicArena(arena) {
     return {
       arenaId: arena.id,
+      kind: arena.kind,
       wave: arena.wave,
       difficulty: arena.difficulty,
-      postBoss: arena.wave === FINAL_WAVE,
       timeLimitSeconds: arena.rules.timeLimitSeconds,
       hintsAllowed: arena.rules.hintsAllowed,
-      totalQuestions: QUESTIONS_PER_ARENA,
+      totalQuestions: arena.rules.questions,
       answered: arena.currentIndex,
       correct: arena.correctCount,
       completed: this.isComplete(arena),
@@ -84,8 +83,9 @@ class ChallengeService {
     };
   }
 
-  // Returns the current question, fetching a puzzle the first time. Asking
-  // again returns the SAME puzzle, so refreshing cannot reroll a hard one.
+  // Returns the current question, fetching a genuine Banana puzzle the first
+  // time. Asking again returns the SAME puzzle (no rerolling). If the API is
+  // down the error propagates (503) and nothing is stored, so Retry works.
   async getQuestion(id, requesterId = null) {
     const arena = this.getArena(id, requesterId);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
@@ -102,10 +102,9 @@ class ChallengeService {
       arenaId: arena.id,
       questionIndex: index,
       questionNumber: index + 1,
-      totalQuestions: QUESTIONS_PER_ARENA,
+      totalQuestions: arena.rules.questions,
       image: q.image,
       source: q.source,
-      fallbackReason: q.fallbackReason || null,
       latencyMs: q.latencyMs,
       timeLimitSeconds: arena.rules.timeLimitSeconds,
       secondsRemaining: Math.max(0, arena.rules.timeLimitSeconds - Math.floor((this.now() - q.issuedAt) / 1000)),
@@ -136,34 +135,37 @@ class ChallengeService {
       correct,
       timedOut,
       correctAnswer: q.solution,
-      explanation: q.explanation || null,
       answered: arena.currentIndex,
+      totalQuestions: arena.rules.questions,
       correctCount: arena.correctCount,
       completed: this.isComplete(arena),
     };
   }
 
-  // Easy mode only: narrows the answer down without giving it away.
+  // Narrows the answer down without giving it away (not on special puzzles).
   useHint(id, requesterId = null) {
     const arena = this.getArena(id, requesterId);
-    if (!arena.rules.hintsAllowed) throw new ChallengeError('Hints are only available on Easy', 403);
+    if (!arena.rules.hintsAllowed) throw new ChallengeError('The special puzzle has no hints', 403);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
     const q = arena.questions[arena.currentIndex];
     if (!q) throw new ChallengeError('Question has not been issued yet', 409);
     if (q.hintUsed) throw new ChallengeError('Hint already used for this question', 409);
     q.hintUsed = true;
     const parity = q.solution % 2 === 0 ? 'even' : 'odd';
-    const range = q.solution < 5 ? 'less than 5' : '5 or more';
-    return { questionIndex: q.index, hint: `The answer is ${parity} and ${range}.` };
+    const range = q.solution < 5 ? 'between 0 and 4' : 'between 5 and 9';
+    return { questionIndex: q.index, hint: `The answer is an ${parity} number ${range}.` };
   }
 
   // Rewards are calculated here, on the server, and can be claimed once.
   claimRewards(id, requesterId = null) {
     const arena = this.getArena(id, requesterId);
-    if (!this.isComplete(arena)) throw new ChallengeError('Answer all four questions first', 409);
+    if (!this.isComplete(arena)) throw new ChallengeError('Answer every question first', 409);
     if (arena.rewardsClaimed) throw new ChallengeError('Rewards already claimed', 409);
     arena.rewardsClaimed = true;
-    return { arenaId: arena.id, ...calculateRewards({ wave: arena.wave, difficulty: arena.difficulty, correct: arena.correctCount }) };
+    return {
+      arenaId: arena.id,
+      ...calculateRewards({ kind: arena.kind, wave: arena.wave, difficulty: arena.difficulty, correct: arena.correctCount }),
+    };
   }
 
   removeExpired() {

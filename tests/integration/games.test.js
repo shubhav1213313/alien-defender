@@ -31,10 +31,10 @@ const result = (overrides = {}) => ({
 
 const VICTORY = result({ outcome: 'victory', score: 98000, waveReached: 5, wavesCleared: 5, enemiesDestroyed: 120, maxCombo: 30, shotsFired: 3000, shotsHit: 1400, bossDefeated: true });
 
-async function playArena(agent, gameSessionId, { wave = 1, difficulty = 'normal', correct = 4 } = {}) {
-  const { body } = await agent.post('/api/challenges').send({ wave, difficulty, gameSessionId }).expect(201);
+async function playArena(agent, gameSessionId, { kind = 'wave', wave = 1, difficulty = 'normal', correct = 2 } = {}) {
+  const { body } = await agent.post('/api/challenges').send({ kind, wave, difficulty, gameSessionId }).expect(201);
   const id = body.data.arenaId;
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < body.data.totalQuestions; i += 1) {
     await agent.get(`/api/challenges/${id}/question`).expect(200);
     await agent.post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: i < correct ? SOLUTION : 0 }).expect(200);
   }
@@ -55,7 +55,7 @@ describe('Protected game endpoints', () => {
   test('leaderboard and achievement catalogue are public', async () => {
     const { app } = setup();
     expect((await request(app).get('/api/leaderboard')).status).toBe(200);
-    expect((await request(app).get('/api/achievements')).body.data).toHaveLength(10);
+    expect((await request(app).get('/api/achievements')).body.data).toHaveLength(11);
   });
 });
 
@@ -125,11 +125,19 @@ describe('Arena results are recorded by the server', () => {
     const agent = await player(app);
     const { body } = await agent.post('/api/games').send({ difficulty: 'normal' });
     const gameSessionId = body.data.gameSessionId;
-    await playArena(agent, gameSessionId, { correct: 3 });
+    await playArena(agent, gameSessionId, { correct: 1 });
     advance(300);
     const res = await agent.post(`/api/games/${gameSessionId}/result`).send({ ...result(), arenaCorrect: 20, arenaQuestions: 20 });
-    expect(res.body.data).toMatchObject({ arenaCorrect: 3, arenaQuestions: 4 });
-    expect(repositories.data.quiz[0]).toMatchObject({ userId: 1, gameSessionId, correct: 3, total: 4 });
+    expect(res.body.data).toMatchObject({ arenaCorrect: 1, arenaQuestions: 2 });
+    expect(repositories.data.quiz[0]).toMatchObject({ userId: 1, gameSessionId, kind: 'wave', correct: 1, total: 2 });
+  });
+
+  test("a linked challenge uses the SAVED game's difficulty, not the browser's", async () => {
+    const { app } = setup();
+    const agent = await player(app);
+    const { body } = await agent.post('/api/games').send({ difficulty: 'easy' });
+    const res = await agent.post('/api/challenges').send({ kind: 'bonus', wave: 5, difficulty: 'hard', gameSessionId: body.data.gameSessionId });
+    expect(res.body.data.difficulty).toBe('easy');
   });
 
   test("an arena cannot be attached to someone else's game", async () => {
@@ -164,7 +172,7 @@ describe('Achievements, profile and leaderboard', () => {
     const agent = await player(app);
     let { body } = await agent.post('/api/games').send({ difficulty: 'hard' });
     const first = body.data.gameSessionId;
-    await playArena(agent, first, { wave: 1, correct: 4 });
+    await playArena(agent, first, { wave: 1, correct: 2 });
     advance(600);
     const res = await agent.post(`/api/games/${first}/result`).send(VICTORY);
     const ids = res.body.data.newAchievements.map((a) => a.id).sort();
@@ -185,14 +193,32 @@ describe('Achievements, profile and leaderboard', () => {
     expect(res.body.data.newAchievements).toEqual([]);
   });
 
-  test('Legendary Defender requires a server-recorded 4/4 Hard post-boss arena', async () => {
+  test('Legendary Defender requires a server-recorded 2/2 Victory Bonus on a Hard game', async () => {
+    const { app, advance } = setup();
+    const agent = await player(app);
+    const normal = (await agent.post('/api/games').send({ difficulty: 'normal' })).body.data.gameSessionId;
+    await playArena(agent, normal, { kind: 'bonus', wave: 5, difficulty: 'hard', correct: 2 }); // browser lies about difficulty
+    advance(600);
+    let res = await agent.post(`/api/games/${normal}/result`).send(VICTORY);
+    expect(res.body.data.newAchievements.map((a) => a.id)).not.toContain('legendary_defender');
+
+    const hard = (await agent.post('/api/games').send({ difficulty: 'hard' })).body.data.gameSessionId;
+    await playArena(agent, hard, { kind: 'bonus', wave: 5, correct: 2 });
+    advance(600);
+    res = await agent.post(`/api/games/${hard}/result`).send(VICTORY);
+    expect(res.body.data.newAchievements.map((a) => a.id)).toContain('legendary_defender');
+  });
+
+  test('Storm Caller unlocks when the special puzzle is solved', async () => {
     const { app, advance } = setup();
     const agent = await player(app);
     const { body } = await agent.post('/api/games').send({ difficulty: 'normal' });
-    await playArena(agent, body.data.gameSessionId, { wave: 5, difficulty: 'hard', correct: 4 });
-    advance(600);
-    const res = await agent.post(`/api/games/${body.data.gameSessionId}/result`).send(VICTORY);
-    expect(res.body.data.newAchievements.map((a) => a.id)).toContain('legendary_defender');
+    await playArena(agent, body.data.gameSessionId, { kind: 'special', wave: 2, correct: 1 });
+    advance(300);
+    const res = await agent.post(`/api/games/${body.data.gameSessionId}/result`).send(result());
+    const ids = res.body.data.newAchievements.map((a) => a.id);
+    expect(ids).toContain('storm_caller');
+    expect(ids).not.toContain('perfect_quiz'); // one special puzzle is not a "perfect quiz"
   });
 
   test('profile shows lifetime stats, recent games and the trophy showcase', async () => {
@@ -206,7 +232,7 @@ describe('Achievements, profile and leaderboard', () => {
     const { body } = await agent.get('/api/profile').expect(200);
     expect(body.data.stats).toMatchObject({ gamesPlayed: 2, highScore: 5000, enemiesDestroyed: 28, accuracy: 30 });
     expect(body.data.recentScores.map((s) => s.score)).toEqual([5000, 1000]);
-    expect(body.data.achievements).toHaveLength(10);
+    expect(body.data.achievements).toHaveLength(11);
     expect(body.data.achievements.find((a) => a.id === 'first_blood').unlocked).toBe(true);
     expect(body.data.achievements.find((a) => a.id === 'boss_slayer').unlocked).toBe(false);
   });

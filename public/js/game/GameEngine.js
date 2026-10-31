@@ -1,5 +1,5 @@
 import { WORLD_WIDTH, WORLD_HEIGHT } from './constants.js';
-import { Player } from './Player.js';
+import { Player, PLASMA_RADIUS } from './Player.js';
 import { EventBus } from './EventBus.js';
 import { GameStateManager, GameState } from './GameStateManager.js';
 import { CollisionManager } from './CollisionManager.js';
@@ -13,15 +13,24 @@ import { AbilityManager } from './AbilityManager.js';
 
 const WAVE_BANNER_SECONDS = 2.5;
 const WAVE_CLEAR_BONUS = 500; // x wave number
-const FINAL_ARENA_WAVE = 5; // the arena after the boss is a victory bonus
+const FINAL_ARENA_WAVE = 5; // the challenge after the boss is a victory bonus
 const ENERGY_TO_SCORE = 10; // leftover energy converts to points at the end
+
+// VOID STORM tuning: strong against waves, deliberately limited against the
+// boss (at most ~15 strikes x 2 damage over 6 s - a fraction of its health).
+export const VOID_STORM = Object.freeze({ interval: 0.4, targetsPerStrike: 3, damage: 3, bossDamage: 2 });
+
+// Optional special puzzle invitation: shown for 4 seconds, at most once per
+// wave (never during the boss fight), only until VOID STORM is unlocked.
+export const SPECIAL_OFFER = Object.freeze({ visibleSeconds: 4, chancePerWave: 0.6, earliest: 6, latest: 16, maxPerGame: 3 });
 
 // Owns the requestAnimationFrame loop and wires the game systems together.
 //   input -> update(dt) -> collision events -> score/wave/state changes -> render()
 // update() never touches the canvas, so the whole simulation can be driven
 // from Jest by calling update() with a fixed dt.
 export class GameEngine {
-  constructor({ canvas = null, input, bus = new EventBus() }) {
+  constructor({ canvas = null, input, bus = new EventBus(), rng = Math.random }) {
+    this.rng = rng; // injectable so tests can control special-offer timing
     this.canvas = canvas;
     this.ctx = canvas ? canvas.getContext('2d') : null;
     this.input = input;
@@ -46,7 +55,7 @@ export class GameEngine {
     this.registerEventHandlers();
     if (input && input.on) {
       input.on('pause', () => this.togglePause());
-      for (const slot of [1, 2, 3, 4]) input.on(`ability${slot}`, () => this.activateAbility(slot));
+      for (const slot of [1, 2, 3, 4, 5]) input.on(`ability${slot}`, () => this.activateAbility(slot));
     }
   }
 
@@ -73,10 +82,16 @@ export class GameEngine {
     this.pendingBoss = false;
     this.alert = null; // short centre-screen message, e.g. "PHASE 2"
     this.abilities.reset();
-    this.timeFreeze = 0;
+    this.stunTimer = 0; // EMP Shockwave: aliens frozen while > 0
     this.shockwaves = [];
-    this.arena = null; // { wave, postBoss } while the Knowledge Arena is open
+    this.voidStorm = null; // { remaining, strikeTimer } while VOID STORM rages
+    this.bolts = []; // lightning bolts being drawn
+    this.arena = null; // { kind, wave } while a Knowledge Challenge is open
     this.appliedArenaIds = new Set(); // guards against applying rewards twice
+    // Optional special puzzle invitation (see updateSpecialOffer).
+    this.specialOffer = null; // { remaining } while the 4-second invitation shows
+    this.specialOfferAt = null; // combat time in this wave when the next offer appears
+    this.specialOffersMade = 0;
     this.stats = {
       enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0, wavesCleared: 0, bossDefeated: false,
       arenaCorrect: 0, arenaQuestions: 0, abilitiesUsed: 0, achievements: [], energyBonus: 0,
@@ -134,9 +149,8 @@ export class GameEngine {
   }
 
   // The engine is the "world" enemies see; `target` is who they aim at.
-  // While invisible (Phantom Overdrive) aliens have nothing to aim at.
   get target() {
-    return this.player.isInvisible ? null : this.player;
+    return this.player;
   }
 
   // ---- Special abilities ----------------------------------------------------
@@ -148,12 +162,47 @@ export class GameEngine {
     return result;
   }
 
-  // EMP Blast / Ultimate Nova: wipes alien bullets and damages every alien.
-  shockwave({ damage, bossDamage, color }) {
+  // EMP Shockwave: wipes alien bullets, damages every alien and stuns them.
+  empShockwave({ damage, bossDamage, stunSeconds }) {
     this.projectiles = this.projectiles.filter((p) => p.owner === 'player');
-    this.shockwaves.push({ x: this.player.x, y: this.player.y, radius: 0, color });
+    this.shockwaves.push({ x: this.player.x, y: this.player.y, radius: 0, color: '#7bdff2' });
+    this.stunTimer = Math.max(this.stunTimer, stunSeconds);
     for (const enemy of [...this.enemies]) {
       if (enemy.alive) this.hitEnemy(enemy, enemy.isBoss ? bossDamage : damage, false);
+    }
+  }
+
+  // VOID STORM: lightning strikes random aliens for a few seconds.
+  startVoidStorm(duration) {
+    this.voidStorm = { remaining: duration, strikeTimer: 0 };
+  }
+
+  updateVoidStorm(dt) {
+    if (!this.voidStorm) return;
+    this.voidStorm.remaining -= dt;
+    this.voidStorm.strikeTimer -= dt;
+    if (this.voidStorm.strikeTimer <= 0) {
+      this.voidStorm.strikeTimer = VOID_STORM.interval;
+      const targets = this.enemies.filter((e) => e.alive && !(e.isBoss && e.isInvulnerable));
+      // Shuffle-pick up to N distinct targets.
+      for (let i = 0; i < VOID_STORM.targetsPerStrike && targets.length; i += 1) {
+        const enemy = targets.splice(Math.floor(Math.random() * targets.length), 1)[0];
+        this.bolts.push({ x: enemy.x, y: enemy.y, life: 0.18 });
+        this.hitEnemy(enemy, enemy.isBoss ? VOID_STORM.bossDamage : VOID_STORM.damage, false);
+      }
+    }
+    if (this.voidStorm && this.voidStorm.remaining <= 0) this.voidStorm = null;
+  }
+
+  // Plasma Shield destroys enemy bullets that touch the barrier.
+  updatePlasmaShield() {
+    if (!this.player.hasPlasmaShield) return;
+    const { x, y } = this.player;
+    for (const p of this.projectiles) {
+      if (p.owner === 'enemy' && Math.hypot(p.x - x, p.y - y) <= PLASMA_RADIUS + p.radius) {
+        p.active = false;
+        this.particles.burst(p.x, p.y, { color: '#50aaff', count: 5, speed: 100, life: 0.2, size: 2 });
+      }
     }
   }
 
@@ -225,10 +274,11 @@ export class GameEngine {
     this.state.transition(GameState.WAVE_TRANSITION);
   }
 
-  // Waves 1-4 are followed by the compulsory Knowledge Challenge Arena.
+  // Waves 1-4 are followed by the COMPULSORY two-puzzle quiz; wave 5 by the boss.
   onWaveComplete(wave, isFinal) {
     this.stats.wavesCleared += 1;
     this.scoreManager.addBonus(WAVE_CLEAR_BONUS * wave, 'wave');
+    this.cancelSpecialOffer();
     if (isFinal) {
       this.onAllWavesCleared();
     } else {
@@ -236,28 +286,77 @@ export class GameEngine {
     }
   }
 
-  // ---- Knowledge Challenge Arena -------------------------------------------
-  // The engine only pauses the game and announces 'arena:open'. The arena UI
-  // runs the four puzzles via the server, then calls applyArenaRewards() and
-  // finishArena(). Combat cannot resume until finishArena() is called.
+  // ---- Knowledge Challenges ------------------------------------------------
+  // The engine only pauses combat and announces 'arena:open'. The challenge
+  // UI runs the Banana puzzles via the server, then calls applyArenaRewards()
+  // and finishArena(). Combat cannot resume until finishArena() is called.
+  //   kind 'wave'    after waves 1-4 (compulsory)   -> next wave banner
+  //   kind 'bonus'   after the boss                 -> victory screen
+  //   kind 'special' optional, accepted mid-combat  -> straight back to combat
 
   openArena(wave, postBoss = false) {
-    this.arena = { wave, postBoss };
+    const kind = postBoss ? 'bonus' : 'wave';
+    this.arena = { kind, wave };
     this.projectiles = []; // no stray bullets waiting when combat resumes
     if (this.input) this.input.releaseAll();
     this.state.transition(GameState.QUIZ);
-    this.bus.emit('arena:open', { wave, postBoss, nextWave: postBoss ? null : wave + 1 });
+    this.bus.emit('arena:open', { kind, wave, postBoss, nextWave: postBoss ? null : wave + 1 });
   }
 
-  // Applies server-calculated rewards once per arena id.
+  // Player clicked the invitation in time: pause combat for ONE puzzle.
+  acceptSpecialOffer() {
+    if (!this.specialOffer || !this.state.is(GameState.PLAYING)) return false;
+    this.specialOffer = null;
+    this.arena = { kind: 'special', wave: this.waves.waveNumber };
+    if (this.input) this.input.releaseAll();
+    this.state.transition(GameState.QUIZ);
+    this.bus.emit('special:accepted', {});
+    this.bus.emit('arena:open', { kind: 'special', wave: this.waves.waveNumber, postBoss: false, nextWave: null });
+    return true;
+  }
+
+  // Schedules and expires the optional "SPECIAL PUZZLE AVAILABLE" invitation.
+  // Called every simulated frame while a normal wave is being fought.
+  updateSpecialOffer(dt) {
+    if (this.specialOffer) {
+      this.specialOffer.remaining -= dt;
+      if (this.specialOffer.remaining <= 0) {
+        this.specialOffer = null;
+        this.bus.emit('special:expired', {});
+      }
+      return;
+    }
+    if (this.specialOfferAt === null || this.waves.combatTime < this.specialOfferAt) return;
+    this.specialOfferAt = null; // at most one invitation per wave
+    if (this.abilities.has('voidStorm') || this.specialOffersMade >= SPECIAL_OFFER.maxPerGame) return;
+    this.specialOffersMade += 1;
+    this.specialOffer = { remaining: SPECIAL_OFFER.visibleSeconds };
+    this.bus.emit('special:offer', { seconds: SPECIAL_OFFER.visibleSeconds, abilityName: 'VOID STORM' });
+  }
+
+  // Decides at the start of each wave whether (and when) to invite the player.
+  scheduleSpecialOffer() {
+    this.specialOfferAt = this.rng() < SPECIAL_OFFER.chancePerWave
+      ? SPECIAL_OFFER.earliest + this.rng() * (SPECIAL_OFFER.latest - SPECIAL_OFFER.earliest)
+      : null;
+  }
+
+  cancelSpecialOffer() {
+    this.specialOfferAt = null;
+    if (this.specialOffer) {
+      this.specialOffer = null;
+      this.bus.emit('special:expired', {});
+    }
+  }
+
+  // Applies server-calculated rewards once per challenge id.
   applyArenaRewards(arenaId, reward) {
     if (!this.state.is(GameState.QUIZ) || !this.arena || this.appliedArenaIds.has(arenaId)) return false;
     this.appliedArenaIds.add(arenaId);
     this.stats.arenaCorrect += reward.correct;
     this.stats.arenaQuestions += reward.total;
     if (reward.energy) this.abilities.addEnergy(reward.energy);
-    if (reward.repair) this.player.heal(reward.repair);
-    if (reward.ability) this.abilities.unlock(reward.ability.id, reward.ability.tier);
+    if (reward.ability) this.abilities.unlock(reward.ability.id);
     if (reward.scoreBonus) this.scoreManager.addBonus(reward.scoreBonus, 'arena');
     for (const id of reward.achievements || []) {
       if (!this.stats.achievements.includes(id)) this.stats.achievements.push(id);
@@ -266,15 +365,16 @@ export class GameEngine {
     return true;
   }
 
-  // Leaves the arena: next wave banner, or - after the boss - final victory.
-  // Works whether or not rewards were applied, so a failed or broken
-  // challenge can never trap the player.
+  // Leaves the challenge. Works whether or not rewards were applied, so a
+  // failed quiz or an unavailable API can never trap the player.
   finishArena() {
     if (!this.state.is(GameState.QUIZ) || !this.arena) return false;
-    const { postBoss } = this.arena;
+    const { kind } = this.arena;
     this.arena = null;
-    this.bus.emit('arena:closed', { postBoss });
-    if (postBoss) {
+    this.bus.emit('arena:closed', { kind, postBoss: kind === 'bonus' });
+    if (kind === 'special') {
+      this.state.transition(GameState.PLAYING); // resume the same wave
+    } else if (kind === 'bonus') {
       // Final performance score: leftover Knowledge Energy becomes points.
       const energy = Math.floor(this.abilities.energy);
       if (energy > 0) this.stats.energyBonus = this.scoreManager.addBonus(energy * ENERGY_TO_SCORE, 'energy');
@@ -368,9 +468,11 @@ export class GameEngine {
     this.elapsed += dt;
     this.scoreManager.update(dt);
     this.abilities.update(dt);
-    this.timeFreeze = Math.max(0, this.timeFreeze - dt);
+    this.stunTimer = Math.max(0, this.stunTimer - dt);
     for (const wave of this.shockwaves) wave.radius += 1400 * dt;
     this.shockwaves = this.shockwaves.filter((w) => w.radius < WORLD_WIDTH * 1.2);
+    for (const bolt of this.bolts) bolt.life -= dt;
+    this.bolts = this.bolts.filter((b) => b.life > 0);
     this.player.update(dt, this.input);
     if (this.input.isDown('fire')) {
       const shots = this.player.fire();
@@ -381,10 +483,11 @@ export class GameEngine {
       }
     }
 
-    // Time Freeze stops every alien and alien bullet; the player keeps moving.
-    const frozen = this.timeFreeze > 0;
-    if (!frozen) for (const enemy of this.enemies) enemy.update(dt, this);
-    for (const p of this.projectiles) if (!frozen || p.owner === 'player') p.update(dt);
+    // EMP stun freezes aliens (they neither move nor shoot); bullets fly on.
+    if (this.stunTimer <= 0) for (const enemy of this.enemies) enemy.update(dt, this);
+    for (const p of this.projectiles) p.update(dt);
+    this.updatePlasmaShield();
+    this.updateVoidStorm(dt);
 
     this.collisions.checkPlayerProjectiles(this.projectiles, this.enemies);
     this.collisions.checkEnemyProjectiles(this.projectiles, this.player);
@@ -404,10 +507,13 @@ export class GameEngine {
           this.spawnBoss();
         } else {
           this.waves.startNextWave();
+          this.scheduleSpecialOffer();
         }
       }
     } else if (this.state.is(GameState.PLAYING)) {
-      this.waves.update(dt, this.enemies.length);
+      if (!this.boss) this.updateSpecialOffer(dt);
+      // The offer may have been accepted from the UI during this frame.
+      if (this.state.is(GameState.PLAYING)) this.waves.update(dt, this.enemies.length);
     }
   }
 
@@ -438,8 +544,13 @@ export class GameEngine {
       if (!this.player.isDead) this.player.draw(ctx);
       this.particles.draw(ctx);
       this.drawShockwaves(ctx);
-      if (this.timeFreeze > 0) {
-        ctx.fillStyle = 'rgba(123, 223, 242, 0.12)';
+      this.drawBolts(ctx);
+      if (this.stunTimer > 0) {
+        ctx.fillStyle = 'rgba(123, 223, 242, 0.10)';
+        ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+      }
+      if (this.voidStorm) {
+        ctx.fillStyle = `rgba(114, 9, 183, ${0.10 + 0.05 * Math.sin(this.elapsed * 20)})`;
         ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
       }
       this.drawHud(ctx);
@@ -522,43 +633,80 @@ export class GameEngine {
     ctx.restore();
   }
 
-  // Knowledge Energy meter and the four ability slots (keys 1-4).
+  // VOID STORM lightning: jagged bolts from the top of the screen.
+  drawBolts(ctx) {
+    if (!this.bolts.length) return;
+    ctx.save();
+    ctx.strokeStyle = '#f9c6ff';
+    ctx.shadowColor = '#f72585';
+    ctx.shadowBlur = 16;
+    ctx.lineWidth = 3;
+    for (const bolt of this.bolts) {
+      ctx.globalAlpha = Math.min(1, bolt.life / 0.1);
+      ctx.beginPath();
+      ctx.moveTo(bolt.x + 20, 0);
+      for (let y = 40; y < bolt.y; y += 40) ctx.lineTo(bolt.x + (Math.random() - 0.5) * 40, y);
+      ctx.lineTo(bolt.x, bolt.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Knowledge Energy meter and the five ability slots (keys 1-5). Each slot
+  // shows: key, short name, energy cost, cooldown (dark fill) and - while the
+  // effect is running - its remaining time as a coloured bar.
   drawAbilityBar(ctx) {
     const { abilities } = this;
+    const width = 5 * 52 - 4;
+    const left = WORLD_WIDTH - width - 16;
     const baseY = WORLD_HEIGHT - 58;
     ctx.save();
     ctx.font = '11px Segoe UI, sans-serif';
     ctx.fillStyle = '#e6f1ff';
-    ctx.fillText(`KNOWLEDGE ENERGY ${Math.floor(abilities.energy)}/${abilities.maxEnergy}`, WORLD_WIDTH - 236, baseY - 8);
+    ctx.fillText(`KNOWLEDGE ENERGY ${Math.floor(abilities.energy)}/${abilities.maxEnergy}`, left, baseY - 8);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(WORLD_WIDTH - 236, baseY - 4, 220, 6);
+    ctx.fillRect(left, baseY - 4, width, 6);
     ctx.fillStyle = '#ffd166';
-    ctx.fillRect(WORLD_WIDTH - 236, baseY - 4, 220 * (abilities.energy / abilities.maxEnergy), 6);
+    ctx.fillRect(left, baseY - 4, width * (abilities.energy / abilities.maxEnergy), 6);
 
-    for (let slot = 1; slot <= 4; slot += 1) {
-      const x = WORLD_WIDTH - 236 + (slot - 1) * 56;
+    const activeFor = {
+      plasmaShield: this.player.effects.plasmaShield,
+      hyperBlaster: this.player.effects.hyperBlaster,
+      tripleBeam: this.player.effects.tripleBeam,
+      voidStorm: this.voidStorm ? this.voidStorm.remaining : 0,
+      empShockwave: this.stunTimer,
+    };
+
+    for (let slot = 1; slot <= 5; slot += 1) {
+      const x = left + (slot - 1) * 52;
       const y = baseY + 6;
       const info = abilities.slotInfo(slot);
       const ready = info && !abilities.blockedReason(slot);
       ctx.fillStyle = info ? 'rgba(13, 22, 48, 0.85)' : 'rgba(255,255,255,0.05)';
-      ctx.fillRect(x, y, 50, 40);
-      ctx.strokeStyle = !info ? 'rgba(255,255,255,0.15)' : ready ? '#39f3c4' : 'rgba(255,209,102,0.5)';
-      ctx.lineWidth = info && info.tier === 'elite' ? 2.5 : 1;
-      ctx.strokeRect(x, y, 50, 40);
+      ctx.fillRect(x, y, 48, 40);
+      ctx.strokeStyle = !info ? 'rgba(255,255,255,0.15)' : ready ? info.color : 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = ready ? 2 : 1;
+      ctx.strokeRect(x, y, 48, 40);
       if (info && info.cooldownLeft > 0) {
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(x, y, 50, 40 * (info.cooldownLeft / info.cooldown));
+        ctx.fillRect(x, y, 48, 40 * (info.cooldownLeft / info.cooldown));
       }
       ctx.fillStyle = info ? '#e6f1ff' : '#55617a';
       ctx.font = 'bold 12px Segoe UI, sans-serif';
       ctx.fillText(String(slot), x + 4, y + 13);
       ctx.font = '9px Segoe UI, sans-serif';
       if (info) {
-        const short = info.name.split(' ').map((w) => w[0]).join('').slice(0, 3);
-        ctx.fillText(short + (info.tier === 'enhanced' ? '+' : info.tier === 'elite' ? '★' : ''), x + 18, y + 13);
+        ctx.fillStyle = info.color;
+        ctx.fillText(info.short, x + 16, y + 13);
+        ctx.fillStyle = this.abilities.energy >= info.cost ? '#e6f1ff' : '#ff4d6d';
         ctx.fillText(`${info.cost}⚡`, x + 4, y + 34);
+        const active = activeFor[info.id] || 0;
+        if (active > 0 && info.duration) {
+          ctx.fillStyle = info.color;
+          ctx.fillRect(x, y + 38, 48 * Math.min(1, active / (info.id === 'empShockwave' ? 2 : info.duration)), 2);
+        }
       } else {
-        ctx.fillText('locked', x + 12, y + 28);
+        ctx.fillText(slot === 5 ? 'special' : 'locked', x + 8, y + 28);
       }
     }
     ctx.restore();
