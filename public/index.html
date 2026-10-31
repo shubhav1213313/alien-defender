@@ -36,6 +36,7 @@
         <div class="menu-links">
           <button class="btn small" data-panel="leaderboard">Leaderboard</button>
           <button class="btn small" data-panel="profile" data-requires-login>Profile &amp; Trophies</button>
+          <button class="btn small" data-panel="admin" data-requires-admin hidden>Admin Dashboard</button>
           <button class="btn small" data-panel="auth" data-guest-only>Log in / Register</button>
         </div>
         <p class="controls">WASD / Arrows: move · Space: shoot · 1–4: abilities · P / Esc: pause · Enter: start</p>
@@ -111,6 +112,14 @@
           <button class="panel-close" data-close aria-label="Close">✕</button>
           <h2 id="profile-title">Pilot Profile</h2>
           <div data-profile-body></div>
+        </div>
+      </section>
+
+      <section id="panel-admin" class="overlay panel" hidden aria-labelledby="admin-title">
+        <div class="panel-box wide">
+          <button class="panel-close" data-close aria-label="Close">✕</button>
+          <h2 id="admin-title">Admin Dashboard</h2>
+          <div data-admin-body></div>
         </div>
       </section>
 

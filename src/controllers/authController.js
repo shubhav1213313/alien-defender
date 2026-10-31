@@ -1,4 +1,5 @@
 const { COOKIE_NAME } = require('../middleware/session');
+const { issueCsrfToken } = require('../middleware/csrf');
 
 // Session fixation protection: a brand-new session id is issued at login,
 // so an id planted before login is useless afterwards.
@@ -7,25 +8,27 @@ function regenerate(req) {
 }
 
 function createAuthController({ auth, users, now = () => Date.now() }) {
+  // Returns the new CSRF token: the old one belonged to the old session.
   async function startSession(req, user) {
     await regenerate(req);
     const t = now();
     req.session.userId = user.id;
     req.session.loginAt = t;
     req.session.lastSeen = t;
+    return issueCsrfToken(req);
   }
 
   return {
     async register(req, res) {
       const user = await auth.register(req.body);
-      await startSession(req, user);
-      res.status(201).json({ success: true, data: { user } });
+      const csrfToken = await startSession(req, user);
+      res.status(201).json({ success: true, data: { user, csrfToken } });
     },
 
     async login(req, res) {
       const user = await auth.login(req.body);
-      await startSession(req, user);
-      res.json({ success: true, data: { user } });
+      const csrfToken = await startSession(req, user);
+      res.json({ success: true, data: { user, csrfToken } });
     },
 
     logout(req, res, next) {
