@@ -11,7 +11,9 @@
     "test:coverage": "jest --coverage",
     "test:live": "jest --testMatch **/tests/live/**/*.live.js --verbose",
     "db:migrate": "node scripts/migrate.js",
-    "test:db": "jest --testMatch **/tests/db/**/*.db.js --runInBand --verbose"
+    "test:db": "jest --testMatch **/tests/db/**/*.db.js --runInBand --verbose",
+    "admin:promote": "node scripts/setRole.js admin",
+    "admin:demote": "node scripts/setRole.js player"
   },
   "engines": {
     "node": ">=20"

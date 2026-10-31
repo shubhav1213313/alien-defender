@@ -8,6 +8,7 @@ import { AccountUI } from './ui/AccountUI.js';
 import { ProfileView, LeaderboardView } from './ui/PlayerViews.js';
 import { GameRecorder } from './ui/GameRecorder.js';
 import { QuoteView, ApiStatusIndicator } from './ui/InfoWidgets.js';
+import { AdminView } from './ui/AdminView.js';
 
 const canvas = document.getElementById('game-canvas');
 canvas.width = WORLD_WIDTH;
@@ -29,6 +30,8 @@ const leaderboard = new LeaderboardView({
 });
 panels.onOpen('profile', () => profile.load());
 panels.onOpen('leaderboard', () => leaderboard.load());
+const adminView = new AdminView({ container: document.querySelector('[data-admin-body]'), account });
+panels.onOpen('admin', () => adminView.load());
 account.restore();
 
 // ---- Second external API (ZenQuotes) and API latency indicator ------------

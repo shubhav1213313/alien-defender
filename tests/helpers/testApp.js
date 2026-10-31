@@ -8,11 +8,15 @@ const { createMemoryRepositories } = require('./memoryRepositories');
 // ZenQuotes is replaced by a fake that fails instantly (fallback quotes),
 // so tests never touch the network unless they inject something else.
 function createTestApp(overrides = {}) {
-  const repositories = overrides.repositories || createMemoryRepositories();
+  const repositories = overrides.repositories || createMemoryRepositories({ now: overrides.now });
   const app = createApp({
     repositories,
     sessionStore: new session.MemoryStore(),
     rateLimiting: false,
+    // CSRF is switched off for the general API suites so each test can focus
+    // on its own feature; tests/integration/csrf.test.js runs the same
+    // flows WITH CSRF protection enabled.
+    csrf: false,
     bcryptRounds: 4,
     quoteService: new QuoteService({ fetchQuotes: async () => { throw Object.assign(new Error('offline in tests'), { code: 'NETWORK' }); }, logger: { warn() {} } }),
     ...overrides,

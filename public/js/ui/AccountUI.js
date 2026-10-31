@@ -38,6 +38,8 @@ export class AccountUI {
     this.renderBar(message);
     this.root.querySelectorAll('[data-requires-login]').forEach((n) => { n.hidden = !user; });
     this.root.querySelectorAll('[data-guest-only]').forEach((n) => { n.hidden = Boolean(user); });
+    // UI convenience only - the server enforces the admin role itself.
+    this.root.querySelectorAll('[data-requires-admin]').forEach((n) => { n.hidden = !user || user.role !== 'admin'; });
     this.welcome.textContent = user
       ? `Welcome back, ${user.username}. Your scores and trophies are saved.`
       : 'Playing as guest - log in to save scores and unlock trophies.';

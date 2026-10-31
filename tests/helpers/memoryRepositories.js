@@ -12,7 +12,8 @@ function duplicate(key) {
   return Object.assign(new Error(`Duplicate entry for key 'users.${key}'`), { code: 'ER_DUP_ENTRY' });
 }
 
-function createMemoryRepositories() {
+// `now` should be the same clock the app uses, so durations are exact.
+function createMemoryRepositories({ now = () => Date.now() } = {}) {
   const users = [];
   const sessions = [];
   const scores = [];
@@ -44,7 +45,7 @@ function createMemoryRepositories() {
     },
     games: {
       async startSession(userId, difficulty) {
-        sessions.push({ id: sessions.length + 1, userId, difficulty, startedAt: new Date(Date.now()), finishedAt: null });
+        sessions.push({ id: sessions.length + 1, userId, difficulty, startedAt: new Date(now()), finishedAt: null });
         return sessions.length;
       },
       async findSession(id) {
@@ -106,6 +107,42 @@ function createMemoryRepositories() {
           perfectCount: mine.filter((q) => q.correct === q.total).length,
           legendaryCount: mine.filter((q) => q.wave === 5 && q.difficulty === 'hard' && q.correct === q.total).length,
         };
+      },
+    },
+    admin: {
+      async overview() {
+        return {
+          users: users.length, admins: users.filter((u) => u.role === 'admin').length,
+          gamesStarted: sessions.length, gamesFinished: scores.length, gamesLast24h: sessions.length,
+          arenasPlayed: quiz.length, puzzlesSolved: quiz.reduce((n, q) => n + q.correct, 0), trophiesUnlocked: unlocked.length,
+        };
+      },
+      async listUsers(limit) {
+        return users.slice().reverse().slice(0, limit).map((u) => {
+          const mine = scores.filter((s) => s.userId === u.id);
+          return { ...pub(u), gamesPlayed: mine.length, bestScore: mine.length ? Math.max(...mine.map((s) => s.score)) : 0 };
+        });
+      },
+      async countAdmins() {
+        return users.filter((u) => u.role === 'admin').length;
+      },
+      async setRole(userId, role) {
+        const u = users.find((x) => x.id === userId);
+        if (!u) return false;
+        u.role = role;
+        return true;
+      },
+      async recentScores(limit) {
+        return scores.slice().reverse().slice(0, limit).map((s) => ({
+          id: s.id, username: users.find((u) => u.id === s.userId).username, difficulty: s.difficulty,
+          outcome: s.outcome, score: s.score, waveReached: s.waveReached, durationSeconds: s.durationSeconds, createdAt: s.createdAt,
+        }));
+      },
+      async deleteScore(id) {
+        const i = scores.findIndex((s) => s.id === id);
+        if (i === -1) return false;
+        scores.splice(i, 1);
+        return true;
       },
     },
     achievements: {

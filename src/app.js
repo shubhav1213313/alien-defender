@@ -9,7 +9,11 @@ const { UserRepository } = require('./repositories/userRepository');
 const { GameRepository } = require('./repositories/gameRepository');
 const { QuizAttemptRepository } = require('./repositories/quizAttemptRepository');
 const { AchievementRepository } = require('./repositories/achievementRepository');
+const { AdminRepository } = require('./repositories/adminRepository');
 const { AuthService } = require('./services/authService');
+const { AdminService } = require('./services/adminService');
+const { createAdminRouter } = require('./routes/adminRoutes');
+const { csrfProtection, csrfTokenRoute } = require('./middleware/csrf');
 const { ScoreService } = require('./services/scoreService');
 const { ChallengeService } = require('./services/challengeService');
 const { PuzzleService } = require('./services/puzzleService');
@@ -29,6 +33,7 @@ function createRepositories(pool) {
     games: new GameRepository(pool),
     quizAttempts: new QuizAttemptRepository(pool),
     achievements: new AchievementRepository(pool),
+    admin: new AdminRepository(pool),
   };
 }
 
@@ -56,6 +61,7 @@ function createApp(options = {}) {
     challengeService = new ChallengeService({ puzzleProvider: puzzleService }),
     quoteService = new QuoteService({ timeoutMs: config.apis.quotesTimeoutMs }),
     rateLimiting = true,
+    csrf = true,
     bcryptRounds = config.bcryptRounds,
     now = () => Date.now(),
     checkDatabase = pool ? () => checkConnection(pool) : undefined,
@@ -63,6 +69,11 @@ function createApp(options = {}) {
 
   const auth = new AuthService({ users: repositories.users, bcryptRounds });
   const scores = new ScoreService({ games: repositories.games, quizAttempts: repositories.quizAttempts, achievements: repositories.achievements, now });
+  const admin = new AdminService({
+    admin: repositories.admin,
+    users: repositories.users,
+    apiStatus: () => ({ banana: puzzleService.lastStatus, quotes: quoteService.status }),
+  });
 
   const app = express();
   // Exposed so the server (on shutdown) and tests can call store.close(),
@@ -88,6 +99,10 @@ function createApp(options = {}) {
     idleMinutes: config.session.idleMinutes,
     secure: config.isProduction,
   }));
+  // CSRF runs BEFORE the timeout check, so an expired session still gets a
+  // clear "session expired" 401 rather than a confusing CSRF error.
+  app.get('/api/csrf-token', csrfTokenRoute);
+  if (csrf) app.use('/api', csrfProtection);
   app.use('/api', sessionTimeouts({
     idleMs: config.session.idleMinutes * 60 * 1000,
     absoluteMs: config.session.absoluteHours * 60 * 60 * 1000,
@@ -99,6 +114,7 @@ function createApp(options = {}) {
   app.use('/api/challenges', createChallengeRouter(challengeService, { limitCreation: rateLimiting, scores }));
   app.use('/api', createGameRouter({ scores, achievements: repositories.achievements }));
   app.use('/api', createInfoRouter({ quotes: quoteService, puzzles: puzzleService }));
+  app.use('/api/admin', createAdminRouter({ admin, users: repositories.users }));
 
   app.use('/api', notFound);
   app.use(errorHandler);

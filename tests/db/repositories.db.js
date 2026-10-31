@@ -123,16 +123,48 @@ describe('GameRepository + QuizAttemptRepository + AchievementRepository', () =>
   });
 });
 
-describe('Full stack with MySQL session store', () => {
-  test('register, session persisted in MySQL, profile, logout', async () => {
-    const app = createApp({ pool, rateLimiting: false, bcryptRounds: 4 });
+describe('AdminRepository', () => {
+  test('overview counts, user list with stats, roles, score moderation', async () => {
+    const counts = await repos.admin.overview();
+    expect(counts.users).toBeGreaterThanOrEqual(3);
+    expect(counts.gamesFinished).toBeGreaterThanOrEqual(3);
+    const users = await repos.admin.listUsers(50);
+    const gamer = users.find((u) => u.username === 'gamer');
+    expect(gamer).toMatchObject({ role: 'player', bestScore: 7000 });
+    expect(gamer.gamesPlayed).toBeGreaterThanOrEqual(2);
+    expect(gamer).not.toHaveProperty('password_hash');
+
+    expect(await repos.admin.countAdmins()).toBe(0);
+    expect(await repos.admin.setRole(gamer.id, 'admin')).toBe(true);
+    expect(await repos.admin.countAdmins()).toBe(1);
+    await expect(repos.admin.setRole(gamer.id, 'superuser')).rejects.toThrow(); // ENUM rejects unknown roles
+
+    const [latest] = await repos.admin.recentScores(1);
+    expect(await repos.admin.deleteScore(latest.id)).toBe(true);
+    expect(await repos.admin.deleteScore(latest.id)).toBe(false);
+  });
+});
+
+describe('Full stack with MySQL session store, CSRF and RBAC enabled', () => {
+  test('register, session in MySQL, admin 403 -> promote -> 200, logout', async () => {
+    const app = createApp({ pool, rateLimiting: false, bcryptRounds: 4 }); // CSRF on by default
     const agent = request.agent(app);
-    await agent.post('/api/auth/register').send({ username: 'stack_user', email: 'stack@example.com', password: 'Stack1234' }).expect(201);
+    const csrf = (await agent.get('/api/csrf-token')).body.data.csrfToken;
+    await agent.post('/api/auth/register').send({ username: 'stack_user', email: 'stack@example.com', password: 'Stack1234' }).expect(403);
+    const reg = await agent.post('/api/auth/register').set('X-CSRF-Token', csrf)
+      .send({ username: 'stack_user', email: 'stack@example.com', password: 'Stack1234' }).expect(201);
+    const token = reg.body.data.csrfToken;
+
     const [sessions] = await pool.query('SELECT data FROM sessions');
     expect(sessions.some((s) => s.data.includes('"userId"'))).toBe(true);
     expect((await agent.get('/api/profile')).status).toBe(200);
     expect((await request(app).get('/api/health')).body.database).toBe('ok');
-    await agent.post('/api/auth/logout').expect(200);
+
+    expect((await agent.get('/api/admin/overview')).status).toBe(403);
+    await pool.execute("UPDATE users SET role = 'admin' WHERE username = 'stack_user'");
+    expect((await agent.get('/api/admin/overview')).status).toBe(200);
+
+    await agent.post('/api/auth/logout').set('X-CSRF-Token', token).expect(200);
     expect((await agent.get('/api/profile')).status).toBe(401);
     const [after] = await pool.query('SELECT data FROM sessions');
     expect(after.some((s) => s.data.includes('"userId"'))).toBe(false); // destroyed in MySQL too

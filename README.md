@@ -5,9 +5,41 @@ mathematics puzzles. Built for **CIS046-3 Software for Enterprise**.
 
 > **Status:** in development. Complete so far: foundation, combat engine,
 > five enemy types, waves/difficulty/scoring, three-phase boss, Knowledge
-> Challenge Arena (Banana API), and MySQL accounts with saved scores,
-> leaderboard and achievements. Still to come: second external API, RBAC
-> admin area, CSRF tokens, audio and final polish.
+> Challenge Arena (Banana API), MySQL accounts with saved scores,
+> leaderboard and achievements, ZenQuotes as a second API, an admin
+> dashboard with role-based access control, and CSRF protection.
+> Still to come: audio, touch controls and final polish.
+
+## Roles and the admin dashboard (RBAC)
+
+Two roles: **player** (default for every new account) and **admin**.
+
+- Every `/api/admin/*` route checks the role **on the server, against the
+  database, on every request** - never a value sent by the browser or
+  cached at login. Guests get **401**, players get **403 Forbidden**.
+- Admins see an *Admin Dashboard* button with: player/game/puzzle counts,
+  external API status, a user list (promote/demote) and recent scores
+  (remove cheated scores from the leaderboard).
+- Safety rules: admins cannot change their own role and the last admin
+  cannot be demoted.
+- There is deliberately **no way to become admin through the website**.
+  Create the first admin from the terminal after registering in the game:
+  ```powershell
+  npm run admin:promote -- your_username
+  npm run admin:demote  -- your_username
+  ```
+
+## CSRF protection
+
+Every `POST`/`PATCH`/`DELETE` request must send an `X-CSRF-Token` header
+matching a random 256-bit token stored in the visitor's server-side session
+(synchronizer token pattern; compared in constant time). Another website
+cannot read the token, so it cannot forge requests even though the browser
+would attach the session cookie. The token is fetched from
+`GET /api/csrf-token`, **rotated at login** together with the session id,
+discarded at logout, and refreshed automatically by the browser client if
+it goes stale. `SameSite=Lax` cookies add a second, independent layer.
+Missing or wrong tokens get `403 { code: "CSRF_INVALID" }`.
 
 ## Second external API: ZenQuotes
 
@@ -212,6 +244,12 @@ games, scores, quiz attempts and trophies.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/health` | none | Liveness + database check → `{ status, database: "ok"/"unavailable" }` |
+| GET | `/api/csrf-token` | none | `{ csrfToken }` for the `X-CSRF-Token` header (all POST/PATCH/DELETE need it) |
+| GET | `/api/admin/overview` | **admin** | Counts + external API status (401 guest, 403 player) |
+| GET | `/api/admin/users` | **admin** | Users with games played and best score |
+| PATCH | `/api/admin/users/:id/role` | **admin** | `{ role: "player" \| "admin" }`; not your own role; not the last admin |
+| GET | `/api/admin/scores` | **admin** | 20 most recent scores |
+| DELETE | `/api/admin/scores/:id` | **admin** | Remove a score from the leaderboard |
 | POST | `/api/auth/register` | none | `{ username, email, password, avatar? }` → 201 + logged in; 400 field errors; 409 duplicate (10/hour) |
 | POST | `/api/auth/login` | none | `{ identifier, password }` (username or email) → 200; 401 generic error (10 failures/15 min) |
 | POST | `/api/auth/logout` | none | Destroys the session |
@@ -234,7 +272,8 @@ games, scores, quiz attempts and trophies.
 \* Arenas are identified by an unguessable random id and kept in server
 memory for 30 minutes. A logged-in player's arena is visible only to that
 player (others get 404), and its result is written to `quiz_attempts`.
-`401` responses carry `code: "AUTH_REQUIRED"` or `"SESSION_EXPIRED"`.
+`401` responses carry `code: "AUTH_REQUIRED"` or `"SESSION_EXPIRED"`;
+`403` responses carry `code: "FORBIDDEN"` (role) or `"CSRF_INVALID"`.
 
 ## Tests
 
