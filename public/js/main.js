@@ -2,6 +2,7 @@ import { WORLD_WIDTH, WORLD_HEIGHT } from './game/constants.js';
 import { InputHandler } from './game/InputHandler.js';
 import { GameEngine } from './game/GameEngine.js';
 import { getDifficulty } from './game/DifficultySettings.js';
+import { KnowledgeArena } from './ui/KnowledgeArena.js';
 
 const canvas = document.getElementById('game-canvas');
 canvas.width = WORLD_WIDTH;
@@ -10,6 +11,9 @@ canvas.height = WORLD_HEIGHT;
 const input = new InputHandler(window);
 const engine = new GameEngine({ canvas, input });
 const { bus } = engine;
+
+// The arena listens for 'arena:open' and drives the puzzle screens.
+new KnowledgeArena({ engine, root: document.getElementById('screen-arena') });
 
 const selectedDifficulty = () => document.querySelector('input[name="difficulty"]:checked').value;
 const startGame = () => engine.startGame(selectedDifficulty());
@@ -30,7 +34,11 @@ function renderSummary(listId, summary) {
     ['Aliens destroyed', summary.enemiesDestroyed],
     ['Best combo', summary.maxCombo],
     ['Accuracy', `${accuracy}%`],
+    ['Puzzles solved', `${summary.arenaCorrect} / ${summary.arenaQuestions}`],
+    ['Abilities used', summary.abilitiesUsed],
   ];
+  if (summary.energyBonus) rows.push(['Leftover energy bonus', `+${summary.energyBonus.toLocaleString()}`]);
+  if (summary.achievements.includes('legendary_defender')) rows.push(['Achievement', 'Legendary Defender']);
   const list = document.getElementById(listId);
   list.replaceChildren(...rows.flatMap(([label, value]) => {
     const dt = document.createElement('dt');

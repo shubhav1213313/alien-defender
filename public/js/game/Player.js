@@ -24,6 +24,17 @@ export class Player {
     this.cooldownTimer = 0;
     this.projectileSpeed = 640;
     this.projectileDamage = 1;
+
+    // Timed ability effects, in seconds remaining (see AbilityDefinitions).
+    this.effects = { ghost: 0, invisible: 0, rapidFire: 0, tripleShot: 0 };
+  }
+
+  get isGhost() {
+    return this.effects.ghost > 0;
+  }
+
+  get isInvisible() {
+    return this.effects.invisible > 0;
   }
 
   get isDead() {
@@ -38,6 +49,7 @@ export class Player {
   update(dt, input) {
     this.invulnerableTimer = Math.max(0, this.invulnerableTimer - dt);
     this.cooldownTimer = Math.max(0, this.cooldownTimer - dt);
+    for (const key of Object.keys(this.effects)) this.effects[key] = Math.max(0, this.effects[key] - dt);
 
     let dx = 0;
     let dy = 0;
@@ -72,22 +84,23 @@ export class Player {
   // Returns the new projectiles (empty while on cooldown).
   fire() {
     if (!this.canFire()) return [];
-    this.cooldownTimer = this.fireCooldown;
-    return [
-      new Projectile({
-        x: this.x,
-        y: this.y - this.height / 2,
-        vy: -this.projectileSpeed,
-        damage: this.projectileDamage,
-        owner: 'player',
-      }),
-    ];
+    this.cooldownTimer = this.fireCooldown * (this.effects.rapidFire > 0 ? 0.4 : 1);
+    const angles = this.effects.tripleShot > 0 ? [-0.2, 0, 0.2] : [0];
+    return angles.map((angle) => new Projectile({
+      x: this.x,
+      y: this.y - this.height / 2,
+      vx: Math.sin(angle) * this.projectileSpeed,
+      vy: -Math.cos(angle) * this.projectileSpeed,
+      damage: this.projectileDamage,
+      owner: 'player',
+      color: angle === 0 ? undefined : '#c77dff',
+    }));
   }
 
   // Shield absorbs damage first, then health. Returns what actually happened
   // so callers (HUD, achievements) can react.
   takeDamage(amount) {
-    if (amount <= 0 || this.isInvulnerable || this.isDead) {
+    if (amount <= 0 || this.isInvulnerable || this.isGhost || this.isDead) {
       return { absorbed: 0, healthLost: 0, ignored: true };
     }
     const absorbed = Math.min(this.shield, amount);
@@ -112,6 +125,8 @@ export class Player {
 
     ctx.save();
     ctx.translate(this.x, this.y);
+    // Ghost / invisible: translucent with a shimmering outline.
+    if (this.isGhost || this.isInvisible) ctx.globalAlpha = 0.35 + 0.15 * Math.sin(Date.now() / 80);
     // Engine glow
     ctx.fillStyle = 'rgba(57, 243, 196, 0.35)';
     ctx.beginPath();
