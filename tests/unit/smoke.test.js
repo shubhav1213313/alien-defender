@@ -7,7 +7,8 @@ const { calculateRewards } = require('../../src/services/arenaRules');
 // drawing code (typos, undefined fields) that unit tests would otherwise miss.
 function stubCanvas() {
   const ctx = new Proxy({}, {
-    get: (target, prop) => (prop in target ? target[prop] : () => {}),
+    // Every method is a no-op; gradients get a dummy with addColorStop().
+    get: (target, prop) => (prop in target ? target[prop] : () => ({ addColorStop() {} })),
     set: (target, prop, value) => { target[prop] = value; return true; },
   });
   return { getContext: () => ctx };

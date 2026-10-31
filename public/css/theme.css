@@ -1,0 +1,269 @@
+/* =========================================================================
+   ALIEN DEFENDER - neon sci-fi theme
+   Base layout and look: colours, fonts, animated space background, glass
+   panels and neon buttons. Component styles live in style.css.
+   ========================================================================= */
+:root {
+  --bg: #04050f;
+  --panel: rgba(10, 16, 40, 0.78);
+  --panel-border: rgba(0, 240, 255, 0.35);
+  --cyan: #00f0ff;
+  --blue: #3d7bff;
+  --purple: #a64dff;
+  --magenta: #ff3df2;
+  --fg: #e6f7ff;
+  --muted: #8fa6c8;
+  --accent: var(--cyan); /* used by component styles */
+  --font-display: 'Orbitron', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  --radius: 14px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.45;
+  overflow-x: hidden;
+}
+
+/* ---------- animated starfield behind the whole page ---------- */
+.space-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(140, 40, 220, 0.25), transparent 55%),
+    radial-gradient(ellipse at 85% 10%, rgba(0, 200, 255, 0.15), transparent 50%),
+    radial-gradient(ellipse at 70% 90%, rgba(255, 40, 180, 0.15), transparent 55%),
+    var(--bg);
+}
+.space-bg::before, .space-bg::after {
+  content: '';
+  position: absolute;
+  inset: -100% 0 0 0;
+  background-image:
+    radial-gradient(1px 1px at 10% 20%, #fff, transparent),
+    radial-gradient(1px 1px at 30% 70%, #9ff6ff, transparent),
+    radial-gradient(1.5px 1.5px at 50% 40%, #fff, transparent),
+    radial-gradient(1px 1px at 70% 85%, #ffc2fb, transparent),
+    radial-gradient(1.5px 1.5px at 90% 15%, #fff, transparent),
+    radial-gradient(1px 1px at 15% 90%, #fff, transparent),
+    radial-gradient(1px 1px at 60% 10%, #9ff6ff, transparent),
+    radial-gradient(1px 1px at 80% 55%, #fff, transparent);
+  background-size: 320px 320px;
+  animation: drift 60s linear infinite;
+  opacity: 0.8;
+}
+.space-bg::after { background-size: 520px 520px; animation-duration: 110s; opacity: 0.5; }
+@keyframes drift { to { transform: translateY(50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .space-bg::before, .space-bg::after, .overlay .title { animation: none; }
+}
+
+/* ---------- top bar ---------- */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+.topbar h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 1.15rem;
+  letter-spacing: 0.12em;
+  background: linear-gradient(90deg, var(--cyan), var(--blue) 40%, var(--purple) 70%, var(--magenta));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.topbar h1 span {
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.3em;
+  -webkit-text-fill-color: var(--magenta);
+}
+.status { color: var(--muted); font-size: 0.85rem; }
+
+/* ---------- play area ---------- */
+.stage { display: flex; justify-content: center; padding: 0 16px 16px; }
+
+/* The frame keeps a 3:2 ratio and scales to fit the window; the canvas and
+   overlays fill it exactly. */
+.game-frame {
+  position: relative;
+  width: min(100%, calc((100vh - 80px) * 1.5));
+  aspect-ratio: 3 / 2;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 0 40px rgba(0, 240, 255, 0.15), 0 0 80px rgba(166, 77, 255, 0.08);
+}
+#game-canvas { width: 100%; height: 100%; display: block; background: var(--bg); }
+
+/* ---------- overlays (menu, pause, end screens, quiz) ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(4, 5, 15, 0.62);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.35s ease;
+}
+.overlay[hidden] { display: none; }
+.overlay h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 3.6vw, 2.2rem);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}
+/* Big gradient logo on the main menu. */
+.overlay .title {
+  font-weight: 900;
+  font-size: clamp(2.2rem, 7.5vw, 4.6rem);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  background: linear-gradient(90deg, var(--cyan), var(--blue) 40%, var(--purple) 70%, var(--magenta));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 18px rgba(0, 240, 255, 0.45));
+  animation: glow 3s ease-in-out infinite alternate;
+}
+@keyframes glow { to { filter: drop-shadow(0 0 30px rgba(255, 61, 242, 0.55)); } }
+.tagline {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.5em;
+  text-transform: uppercase;
+  color: var(--magenta);
+  text-shadow: 0 0 14px rgba(255, 61, 242, 0.7);
+}
+h3 { font-family: var(--font-display); font-size: 0.95rem; letter-spacing: 0.08em; color: var(--magenta); margin: 0.6em 0 0.3em; }
+.controls { color: var(--muted); font-size: 0.9rem; }
+.danger { color: #ff4d6a !important; text-shadow: 0 0 18px rgba(255, 77, 106, 0.6) !important; }
+.victory { color: #4dff9c !important; text-shadow: 0 0 22px rgba(77, 255, 156, 0.6) !important; }
+
+/* ---------- neon buttons ---------- */
+.btn {
+  min-width: 200px;
+  padding: 12px 22px;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg);
+  background: rgba(0, 240, 255, 0.06);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.2s, background 0.2s, border-color 0.2s;
+}
+.btn:hover, .btn:focus-visible {
+  background: rgba(0, 240, 255, 0.14);
+  box-shadow: 0 0 18px rgba(0, 240, 255, 0.35);
+  transform: translateY(-1px);
+}
+.btn:focus-visible { outline: 2px solid var(--magenta); outline-offset: 3px; }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn.primary {
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.25), rgba(166, 77, 255, 0.3));
+  border-color: var(--cyan);
+  color: var(--fg);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.25);
+}
+.btn.primary:hover, .btn.primary:focus-visible {
+  background: linear-gradient(90deg, rgba(0, 240, 255, 0.4), rgba(166, 77, 255, 0.45));
+}
+
+/* ---------- difficulty picker ---------- */
+.difficulty { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 6px; padding: 0; border: 0; }
+.difficulty legend {
+  width: 100%;
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.difficulty input { position: absolute; opacity: 0; pointer-events: none; }
+.difficulty span {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 9px 12px;
+  border: 1px solid rgba(143, 166, 200, 0.4);
+  border-radius: 8px;
+  background: rgba(10, 16, 40, 0.55);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.difficulty strong { font-family: var(--font-display); font-size: 0.8rem; letter-spacing: 0.08em; }
+.difficulty small { color: var(--muted); font-size: 0.8rem; }
+.difficulty label:hover span { border-color: rgba(255, 61, 242, 0.6); }
+.difficulty input:checked + span { border-color: var(--magenta); box-shadow: 0 0 12px rgba(255, 61, 242, 0.35); }
+.difficulty input:checked + span strong { color: var(--magenta); }
+.difficulty input:focus-visible + span { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* ---------- end-of-game summary ---------- */
+.summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 24px;
+  margin: 4px 0 8px;
+  padding: 12px 18px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+}
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; font-family: var(--font-display); font-size: 0.9rem; color: var(--cyan); text-align: right; }
+
+/* ---------- glass panels (login, profile, leaderboard, admin, quiz) ---------- */
+.panel-box, .arena-panel {
+  padding: 22px clamp(16px, 3vw, 30px);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: 0 0 40px rgba(0, 240, 255, 0.12), inset 0 0 30px rgba(166, 77, 255, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.8em;
+  padding: 2px 6px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  text-align: center;
+  color: var(--cyan);
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  border-radius: 6px;
+}
+
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
