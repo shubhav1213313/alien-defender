@@ -64,6 +64,19 @@ describe('AccountUI', () => {
     expect(document.getElementById('form-login').querySelector('[name="password"]').value).toBe('');
   });
 
+  test('registering logs the player straight in (no separate login step)', async () => {
+    const { account, panels, calls } = setup({ 'POST /api/auth/register': (body) => ({ user: { ...USER, username: body.username } }) });
+    panels.open('auth');
+    account.showTab('register');
+    await fill(document.getElementById('form-register'), { username: 'new_pilot', email: 'new@example.com', password: 'Secret123' });
+    expect(calls).toHaveLength(1); // only the register call - no second login request needed
+    expect(account.user.username).toBe('new_pilot');
+    expect(document.getElementById('panel-auth').hidden).toBe(true);
+    expect(document.getElementById('account-bar').textContent).toContain('new_pilot');
+    expect(document.getElementById('account-bar').textContent).toContain('Log out');
+    expect(document.getElementById('menu-welcome').textContent).toContain('Welcome back, new_pilot');
+  });
+
   test('registration errors from the server appear next to each field', async () => {
     const { panels, account } = setup({
       'POST /api/auth/register': () => { throw new ApiError('Please fix the highlighted fields', 400, { details: { username: 'That username is already taken' } }); },
