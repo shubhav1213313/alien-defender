@@ -9,6 +9,7 @@ const KEY_BINDINGS = {
   Space: 'fire',
   KeyP: 'pause', Escape: 'pause',
   Enter: 'confirm',
+  KeyM: 'mute',
   Digit1: 'ability1', Digit2: 'ability2', Digit3: 'ability3', Digit4: 'ability4', Digit5: 'ability5',
 };
 
