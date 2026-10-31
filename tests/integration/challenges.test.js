@@ -1,6 +1,6 @@
 // Integration tests for the Knowledge Challenge REST API.
 // The Banana API is MOCKED here (see tests/live for the real connectivity check).
-// Banana behaviour is tested on wave 4; waves 1-3 use local fixed questions.
+// Live Banana behaviour is tested on wave 4; waves 1-3 use the fixed cached puzzles.
 const request = require('supertest');
 const { createTestApp } = require('../helpers/testApp');
 const { ChallengeService } = require('../../src/services/challengeService');
@@ -56,21 +56,21 @@ describe('Challenge lifecycle', () => {
     expect(res.body.data).toMatchObject({ kind: 'wave', wave: 3, totalQuestions: 2, hintsAllowed: true });
   });
 
-  test('waves 1-3 are labelled as local fixed questions; wave 4 as live Banana puzzles', async () => {
+  test('waves 1-3 are labelled as cached genuine Banana puzzles; wave 4 as live Banana puzzles', async () => {
     const app = appWith();
     for (const wave of [1, 2, 3]) {
-      expect((await request(app).get(`/api/challenges/rules?kind=wave&wave=${wave}`)).body.data).toMatchObject({ source: 'local-fixed', note: expect.stringMatching(/local fixed quiz questions/) });
+      expect((await request(app).get(`/api/challenges/rules?kind=wave&wave=${wave}`)).body.data).toMatchObject({ source: 'banana-cached', note: expect.stringContaining('saved (cached) from the API - the same two every game, not fetched live') });
     }
     expect((await request(app).get('/api/challenges/rules?kind=wave&wave=4')).body.data).toMatchObject({ source: 'banana', note: expect.stringMatching(/Banana API/) });
   });
 
-  test('wave 2 over HTTP: "4 × 2 = ?" then "9 - 3 = ?", answers checked on the server, 2/2 unlocks Hyper Blaster', async () => {
+  test('wave 2 over HTTP: puzzles W2-Q1 then W2-Q2 (images), answers checked on the server, 2/2 unlocks Hyper Blaster', async () => {
     const app = appWith(async () => { throw new Error('the Banana API must not be called for waves 1-3'); });
     const id = await start(app, { kind: 'wave', wave: 2 });
-    const expected = [['4 × 2 = ?', 8], ['9 - 3 = ?', 6]];
+    const expected = [['W2-Q1', 4], ['W2-Q2', 0]];
     for (let i = 0; i < 2; i += 1) {
       const q = await request(app).get(`/api/challenges/${id}/question`).expect(200);
-      expect(q.body.data).toMatchObject({ text: expected[i][0], source: 'local-fixed', image: null });
+      expect(q.body.data).toMatchObject({ puzzleId: expected[i][0], source: 'banana-cached', image: expect.stringMatching(/^data:image\/png;base64,/) });
       expect(JSON.stringify(q.body)).not.toMatch(/solution|correctAnswer/);
       const a = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: expected[i][1] }).expect(200);
       expect(a.body.data.correct).toBe(true);

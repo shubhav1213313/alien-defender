@@ -2,7 +2,7 @@ const { ChallengeService, SUBMIT_GRACE_SECONDS, DUPLICATE_REFETCHES } = require(
 const { PuzzleUnavailableError } = require('../../src/services/puzzleService');
 
 // Mock puzzle provider: solutions 3, 7, 1 in order (genuine-looking PNG data URIs).
-// Banana behaviour is tested on wave 4; waves 1-3 use local fixed questions.
+// Live Banana behaviour is tested on wave 4; waves 1-3 use the fixed cached puzzles.
 function mockProvider(solutions = [3, 7, 1]) {
   let i = 0;
   return { getPuzzle: jest.fn(async () => ({ image: `data:image/png;base64,AAAA${i}`, solution: solutions[i++ % solutions.length], source: 'banana', latencyMs: 100 })) };
@@ -161,28 +161,37 @@ describe('ChallengeService', () => {
   });
 });
 
-describe('Local fixed questions after waves 1-3', () => {
+describe('Fixed (cached genuine) Banana puzzles after waves 1-3', () => {
+  // Puzzle id -> the solution the live Banana API returned with that image
+  // (each answer was also checked by solving the puzzle's equations).
   const FIXED = {
-    1: [['3 + 2 = ?', 5], ['7 - 3 = ?', 4]],
-    2: [['4 × 2 = ?', 8], ['9 - 3 = ?', 6]],
-    3: [['3 × 3 = ?', 9], ['8 - 6 = ?', 2]],
+    1: [['W1-Q1', 7], ['W1-Q2', 0]],
+    2: [['W2-Q1', 4], ['W2-Q2', 0]],
+    3: [['W3-Q1', 0], ['W3-Q2', 3]],
   };
   const ABILITY = { 1: 'plasmaShield', 2: 'hyperBlaster', 3: 'tripleBeam' };
 
-  test.each([1, 2, 3])('wave %i: the same two questions, in order, every game, without the Banana API', async (wave) => {
-    for (let game = 0; game < 2; game += 1) {
-      const { service, provider } = setup({ wave });
-      const asked = [];
-      for (let i = 0; i < 2; i += 1) {
-        const q = await service.getQuestion('c1');
-        expect(q).toMatchObject({ questionNumber: i + 1, totalQuestions: 2, source: 'local-fixed', image: null });
-        expect(JSON.stringify(q)).not.toMatch(/solution|correctAnswer/);
-        asked.push(q.text);
-        service.submitAnswer('c1', { questionIndex: i, answer: FIXED[wave][i][1] });
-      }
-      expect(asked).toEqual(FIXED[wave].map(([text]) => text));
-      expect(provider.getPuzzle).not.toHaveBeenCalled();
+  async function playthrough(wave) {
+    const { service, provider } = setup({ wave });
+    const asked = [];
+    for (let i = 0; i < 2; i += 1) {
+      const q = await service.getQuestion('c1');
+      expect(q).toMatchObject({ questionNumber: i + 1, totalQuestions: 2, source: 'banana-cached', latencyMs: null });
+      expect(q.image).toMatch(/^data:image\/png;base64,iVBORw0KGgo/); // a real PNG image
+      expect(JSON.stringify(q)).not.toMatch(/solution|correctAnswer/);
+      asked.push({ id: q.puzzleId, image: q.image });
+      service.submitAnswer('c1', { questionIndex: i, answer: FIXED[wave][i][1] });
     }
+    expect(provider.getPuzzle).not.toHaveBeenCalled(); // never replaced by a live puzzle
+    return asked;
+  }
+
+  test.each([1, 2, 3])('wave %i: the same two puzzle images, in the same order, in every game', async (wave) => {
+    const first = await playthrough(wave);
+    const restarted = await playthrough(wave);
+    expect(first.map((q) => q.id)).toEqual(FIXED[wave].map(([id]) => id));
+    expect(restarted).toEqual(first);
+    expect(first[0].image).not.toBe(first[1].image);
   });
 
   test.each([1, 2, 3])('wave %i: answers are checked on the server; 2/2 unlocks the ability', async (wave) => {
@@ -193,12 +202,12 @@ describe('Local fixed questions after waves 1-3', () => {
   });
 
   test.each([
-    [[5, 0], 1],
-    [[0, 0], 0],
-  ])('wave 1 answers %p -> %i/2, no ability, wrong answer revealed only after submitting', async (answers, correct) => {
+    [[7, 5], 1],
+    [[1, 5], 0],
+  ])('wave 1 answers %p -> %i/2, no ability, answer revealed only after submitting', async (answers, correct) => {
     const { service } = setup({ wave: 1 });
     const results = await answerAll(service, answers);
-    expect(results[1]).toMatchObject({ correct: false, correctAnswer: 4 });
+    expect(results[1]).toMatchObject({ correct: false, correctAnswer: 0 });
     expect(service.claimRewards('c1')).toMatchObject({ correct, ability: null });
   });
 });

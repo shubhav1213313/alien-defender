@@ -1,28 +1,45 @@
-// LOCAL FIXED quiz questions for the compulsory quizzes after waves 1-3.
-// These are NOT Banana API puzzles: they are the same, in the same order,
-// every game. They live only on the server - the browser receives the
-// question text, never the solution, until an answer has been submitted.
-// Wave 4 (and the bonus / special puzzles) still use the live Banana API.
-const FIXED_WAVE_QUESTIONS = Object.freeze({
-  1: Object.freeze([
-    Object.freeze({ text: '3 + 2 = ?', solution: 5 }),
-    Object.freeze({ text: '7 - 3 = ?', solution: 4 }),
-  ]),
-  2: Object.freeze([
-    Object.freeze({ text: '4 × 2 = ?', solution: 8 }),
-    Object.freeze({ text: '9 - 3 = ?', solution: 6 }),
-  ]),
-  3: Object.freeze([
-    Object.freeze({ text: '3 × 3 = ?', solution: 9 }),
-    Object.freeze({ text: '8 - 6 = ?', solution: 2 }),
-  ]),
-});
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
-const FIXED_SOURCE = 'local-fixed';
+// FIXED puzzles for the compulsory quizzes after waves 1-3: six GENUINE
+// Marc Conrad Banana API puzzles (two per wave), saved once from the live
+// API by scripts/cacheFixedPuzzles.js. The same images, in the same order,
+// are used in every game. They are labelled "cached" in the game - they
+// are NOT fetched live each time. Wave 4 (and the bonus / special puzzles)
+// still use the live API.
+//
+// The images and the API's solutions live in data/banana-fixed/, outside
+// public/, so the browser only ever receives an image, never an answer.
+const DIR = path.join(__dirname, '..', '..', 'data', 'banana-fixed');
+const FIXED_SOURCE = 'banana-cached';
 
-// The fixed questions for a challenge, or null when it uses the Banana API.
-function fixedQuestionsFor(kind, wave) {
-  return kind === 'wave' && Object.prototype.hasOwnProperty.call(FIXED_WAVE_QUESTIONS, wave) ? FIXED_WAVE_QUESTIONS[wave] : null;
+// Loads the manifest and images once, checking every image against the
+// SHA-256 recorded when it was fetched, so a changed file is caught.
+function loadFixedPuzzles(dir = DIR) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+  const byWave = {};
+  for (const p of manifest.puzzles) {
+    const png = fs.readFileSync(path.join(dir, p.file));
+    const hash = crypto.createHash('sha256').update(png).digest('hex');
+    if (hash !== p.sha256) throw new Error(`Fixed puzzle ${p.file} does not match its recorded SHA-256`);
+    (byWave[p.wave] = byWave[p.wave] || [])[p.question - 1] = Object.freeze({
+      id: p.id, file: p.file, solution: p.solution, image: `data:image/png;base64,${png.toString('base64')}`,
+    });
+  }
+  return Object.freeze(byWave);
 }
 
-module.exports = { FIXED_WAVE_QUESTIONS, FIXED_SOURCE, fixedQuestionsFor };
+let cache = null;
+const fixedPuzzles = () => {
+  if (!cache) cache = loadFixedPuzzles();
+  return cache;
+};
+
+// The fixed puzzles for a challenge, or null when it uses the live API.
+function fixedQuestionsFor(kind, wave) {
+  if (kind !== 'wave' || ![1, 2, 3].includes(wave)) return null;
+  return fixedPuzzles()[wave];
+}
+
+module.exports = { FIXED_SOURCE, fixedQuestionsFor, loadFixedPuzzles };

@@ -87,9 +87,9 @@ class ChallengeService {
     };
   }
 
-  // Returns the current question. Waves 1-3 use the LOCAL FIXED questions in
-  // their fixed order; everything else fetches a genuine Banana puzzle the
-  // first time. Asking again returns the SAME question (no rerolling). If the
+  // Returns the current question. Waves 1-3 use the FIXED genuine Banana
+  // puzzles (cached from the API) in their fixed order; everything else
+  // fetches a live Banana puzzle the first time. Asking again returns the SAME question (no rerolling). If the
   // API is down the error propagates (503) and nothing is stored, so Retry works.
   async getQuestion(id, requesterId = null) {
     const arena = this.getArena(id, requesterId);
@@ -98,7 +98,7 @@ class ChallengeService {
     if (!arena.questions[index]) {
       const fixed = fixedQuestionsFor(arena.kind, arena.wave);
       const question = fixed
-        ? { text: fixed[index].text, solution: fixed[index].solution, image: null, source: FIXED_SOURCE, latencyMs: null }
+        ? { puzzleId: fixed[index].id, image: fixed[index].image, solution: fixed[index].solution, source: FIXED_SOURCE, latencyMs: null }
         : await this.freshPuzzle(arena);
       // Another request may have stored a question while we were waiting.
       if (!arena.questions[index]) {
@@ -111,7 +111,7 @@ class ChallengeService {
       questionIndex: index,
       questionNumber: index + 1,
       totalQuestions: arena.rules.questions,
-      text: q.text || null,
+      puzzleId: q.puzzleId || null,
       image: q.image,
       source: q.source,
       latencyMs: q.latencyMs,

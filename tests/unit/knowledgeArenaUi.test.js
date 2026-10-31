@@ -12,6 +12,7 @@ import { EventBus } from '../../public/js/game/EventBus.js';
 const { ChallengeService } = require('../../src/services/challengeService');
 const { PuzzleUnavailableError } = require('../../src/services/puzzleService');
 const { describeChallenge } = require('../../src/services/arenaRules');
+const { fixedQuestionsFor } = require('../../src/services/fixedQuizQuestions');
 
 const html = fs.readFileSync(path.join(__dirname, '../../public/index.html'), 'utf8');
 const SOLUTIONS = [4, 6, 1];
@@ -78,24 +79,26 @@ describe('Compulsory 2-puzzle quiz', () => {
     expect(body().querySelector('.reward-preview').textContent).toBe('SOLVE BOTH PUZZLES TO UNLOCK PLASMA SHIELD');
     expect(body().querySelector('.arena-instructions').textContent).toMatch(/0-9 buttons/);
     expect(body().textContent).toMatch(/next wave starts afterwards/);
-    expect(body().querySelector('.arena-instructions').textContent).toContain('local fixed quiz questions (not Banana API puzzles)');
+    expect(body().querySelector('.arena-instructions').textContent).toContain('Each picture is a real Banana puzzle');
+    expect(body().querySelector('.arena-note').textContent).toContain('saved (cached) from the API - the same two every game, not fetched live');
   });
 
-  test('wave 1: the local fixed questions "3 + 2 = ?" and "7 - 3 = ?", clearly labelled, 2/2 unlocks Plasma Shield', async () => {
+  test('wave 1: the two fixed Banana puzzle IMAGES, labelled as cached, 2/2 unlocks Plasma Shield', async () => {
     const { bus, engine, body, calls } = setup();
     bus.emit('arena:open', { kind: 'wave', wave: 1, nextWave: 2 });
     await flush();
     await click('Start the quiz');
-    expect(body().textContent).toContain('QUESTION 1 OF 2');
-    expect(body().querySelector('.arena-equation').textContent).toBe('3 + 2 = ?');
-    expect(body().querySelector('.badge.local').textContent).toBe('Local fixed question');
-    expect(body().querySelector('.arena-puzzle')).toBeNull(); // no Banana picture
-    expect(body().textContent).not.toMatch(/Banana/);
-    await pressDigit(5);
+    expect(body().textContent).toContain('PUZZLE 1 OF 2');
+    const first = body().querySelector('.arena-puzzle').src;
+    expect(first).toBe(fixedQuestionsFor('wave', 1)[0].image); // the saved W1-Q1 image, untouched
+    expect(body().querySelector('.badge.cached').textContent).toBe('Banana API puzzle · cached');
+    expect(body().querySelector('.badge.live')).toBeNull(); // never claims to be live
+    expect(body().querySelectorAll('.digit')).toHaveLength(10);
+    await pressDigit(7);
     expect(body().querySelector('.feedback.correct')).not.toBeNull();
     await click('Next puzzle');
-    expect(body().querySelector('.arena-equation').textContent).toBe('7 - 3 = ?');
-    await pressDigit(4);
+    expect(body().querySelector('.arena-puzzle').src).toBe(fixedQuestionsFor('wave', 1)[1].image);
+    await pressDigit(0);
     await click('See the result');
     expect(body().querySelector('.arena-score').textContent).toBe('2 / 2');
     expect(body().querySelector('.unlock').textContent).toBe('⚡ Plasma Shield UNLOCKED!');
@@ -132,12 +135,12 @@ describe('Compulsory 2-puzzle quiz', () => {
     bus.emit('arena:open', { kind: 'wave', wave: 3, nextWave: 4 });
     await flush();
     await click('Start the quiz');
-    expect(body().querySelector('.arena-equation').textContent).toBe('3 × 3 = ?');
-    await pressDigit(9);
-    await click('Next puzzle');
-    expect(body().querySelector('.arena-equation').textContent).toBe('8 - 6 = ?');
+    expect(body().querySelector('.arena-puzzle').src).toBe(fixedQuestionsFor('wave', 3)[0].image);
     await pressDigit(0);
-    expect(body().textContent).toContain('The answer was 2.');
+    await click('Next puzzle');
+    expect(body().querySelector('.arena-puzzle').src).toBe(fixedQuestionsFor('wave', 3)[1].image);
+    await pressDigit(5);
+    expect(body().textContent).toContain('The answer was 3.');
     await click('See the result');
     expect(body().querySelector('.arena-score').textContent).toBe('1 / 2');
     expect(body().textContent).toContain('Triple Beam stays locked');
@@ -151,7 +154,7 @@ describe('Compulsory 2-puzzle quiz', () => {
     bus.emit('arena:open', { kind: 'wave', wave: 1, nextWave: 2 });
     await flush();
     await click('Start the quiz');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '5' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '7' }));
     await flush();
     expect(body().querySelector('.feedback.correct')).not.toBeNull();
   });
@@ -161,10 +164,10 @@ describe('Compulsory 2-puzzle quiz', () => {
     bus.emit('arena:open', { kind: 'wave', wave: 1, nextWave: 2 });
     await flush();
     await click('Start the quiz');
-    const five = document.querySelector('[data-digit="5"]');
-    five.click();
-    five.click();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '5' }));
+    const seven = document.querySelector('[data-digit="7"]');
+    seven.click();
+    seven.click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '7' }));
     await flush();
     expect(calls.filter((c) => c.includes('/answer'))).toHaveLength(1);
     expect(body().textContent).not.toMatch(/already been answered|expired/);
@@ -179,7 +182,7 @@ describe('Compulsory 2-puzzle quiz', () => {
     await click('Show a hint');
     const hint = document.querySelector('.arena-hint').textContent;
     expect(hint).toBe('Hint: The answer is an odd number between 5 and 9.');
-    expect(hint).not.toMatch(/answer is 5/); // narrows it down, never gives it away
+    expect(hint).not.toMatch(/answer is 7/); // narrows it down, never gives it away
   });
 
   test('Banana API down: Retry or Continue without ability - never stuck, nothing fabricated', async () => {

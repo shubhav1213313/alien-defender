@@ -20,7 +20,7 @@ describe('LIVE: Marc Conrad Banana API', () => {
   // know it in advance: it answers 0 and checks that the server marks the
   // answer and reveals each live puzzle's solution afterwards.
   // Wave 4 is the only post-wave quiz that uses the Banana API (waves 1-3
-  // are local fixed questions); its two puzzles must be different.
+  // use six fixed puzzles cached from the API); its two puzzles must be different.
   test.each([
     ['wave', 4, 2],
     ['special', 3, 1],
