@@ -1,0 +1,55 @@
+:root {
+  --bg: #05070f;
+  --panel: #0d1630;
+  --fg: #e6f1ff;
+  --accent: #39f3c4;
+  --muted: #7a8aa6;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, var(--panel) 0%, var(--bg) 70%);
+  color: var(--fg);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  text-shadow: 0 0 12px rgba(57, 243, 196, 0.6);
+}
+
+.topbar h1 span { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.25em; }
+
+.status { color: var(--muted); font-size: 0.85rem; }
+
+.stage {
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+}
+
+/* Canvas keeps its 3:2 logical size and scales to fit the window. */
+#game-canvas {
+  width: min(100%, calc((100vh - 110px) * 1.5));
+  aspect-ratio: 3 / 2;
+  border: 1px solid rgba(57, 243, 196, 0.35);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 0 30px rgba(57, 243, 196, 0.12);
+}
+
+.hint { text-align: center; color: var(--muted); font-size: 0.85rem; }

@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Secrets - never commit real environment files
+.env
+.env.*
+!.env.example
+
+# Test / coverage output
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
