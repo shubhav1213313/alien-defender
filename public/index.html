@@ -11,10 +11,34 @@
     <h1>ALIEN DEFENDER <span>The Last Stand</span></h1>
     <span id="server-status" class="status">Checking server…</span>
   </header>
+
   <main class="stage">
-    <canvas id="game-canvas" aria-label="Alien Defender game area"></canvas>
+    <div class="game-frame">
+      <canvas id="game-canvas" aria-label="Alien Defender game area"></canvas>
+
+      <!-- Overlays: only one is visible at a time, chosen by the game state. -->
+      <section id="screen-menu" class="overlay" data-state="menu">
+        <h2 class="title">ALIEN DEFENDER</h2>
+        <p class="tagline">The Last Stand</p>
+        <button id="btn-start" class="btn primary">Start Game</button>
+        <p class="controls">WASD / Arrows: move · Space: shoot · P / Esc: pause</p>
+      </section>
+
+      <section id="screen-paused" class="overlay" data-state="paused" hidden>
+        <h2>Paused</h2>
+        <button id="btn-resume" class="btn primary">Resume</button>
+        <button id="btn-quit" class="btn">Quit to Menu</button>
+      </section>
+
+      <section id="screen-gameover" class="overlay" data-state="gameOver" hidden>
+        <h2 class="danger">Earth Has Fallen</h2>
+        <p id="gameover-summary"></p>
+        <button id="btn-restart" class="btn primary">Play Again</button>
+        <button id="btn-menu" class="btn">Main Menu</button>
+      </section>
+    </div>
   </main>
-  <p class="hint">Move with WASD / Arrow keys</p>
+
   <script type="module" src="js/main.js"></script>
 </body>
 </html>
