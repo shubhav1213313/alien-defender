@@ -286,6 +286,22 @@ npm run test:live   # REAL Banana API (needs internet)
 
 Unknown `/api/*` routes return `404 { "success": false, "error": "Not found" }`.
 
+## Troubleshooting
+
+**Registration says "server problem" / "username or email already
+registered", or the game looks different from expected.** Check that
+http://localhost:3000 is really *this* project: open
+<http://localhost:3000/api/health> - it must show `"app":"alienn-defender"`.
+If it does not, another server (for example an older copy of the game in a
+different folder) is using port 3000. `npm start` now refuses to start in
+that case and prints `ERROR: port 3000 is already in use ...`. Stop the
+other server (Ctrl+C in its terminal, or end its `node.exe` in Task
+Manager), or set a different `PORT` in `.env`.
+
+**`npm start` says it cannot connect to MySQL.** Check the MySQL80 service
+is running and `DB_USER` / `DB_PASSWORD` in `.env`; run `npm run db:migrate`
+if the database does not exist yet.
+
 ## Security notes
 
 - Helmet sets security headers including a Content Security Policy that
