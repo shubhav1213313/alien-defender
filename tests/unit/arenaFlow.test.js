@@ -47,6 +47,7 @@ describe('Compulsory quiz after each wave (no Upgrade Bay)', () => {
     engine.bus.on('arena:open', opened);
     for (const e of engine.enemies) e.alive = false;
     engine.waves.queue = [];
+    engine.waves.kills = engine.waves.requiredKills; // the player destroyed enough aliens
     engine.update(0.016);
     expect(engine.state.state).toBe(GameState.QUIZ);
     expect(opened).toHaveBeenCalledWith({ kind: 'wave', wave: 1, postBoss: false, nextWave: 2 });
@@ -75,7 +76,7 @@ describe('Compulsory quiz after each wave (no Upgrade Bay)', () => {
     expect(engine.abilities.has(WAVE_ABILITIES[wave])).toBe(true);
     engine.finishArena();
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
-    expect(engine.banner.title).toBe(`WAVE ${wave + 1}`);
+    expect(engine.banner.title).toBe(`WAVE ${wave + 1} STARTING`);
   });
 
   test.each([0, 1])('%i/2 unlocks nothing but the next wave still starts', (correct) => {
@@ -84,7 +85,7 @@ describe('Compulsory quiz after each wave (no Upgrade Bay)', () => {
     expect(engine.abilities.slots.size).toBe(0);
     expect(engine.abilities.energy).toBe(correct * 15);
     expect(engine.finishArena()).toBe(true);
-    expect(engine.banner.title).toBe('WAVE 2');
+    expect(engine.banner.title).toBe('WAVE 2 STARTING');
   });
 
   test('rewards apply once per challenge id', () => {

@@ -50,6 +50,10 @@ export const WAVES = [
   },
 ];
 
+// A wave only counts as cleared if the player destroyed at least this
+// fraction of its aliens (rounded up); otherwise the same wave is retried.
+export const REQUIRED_KILL_FRACTION = 0.5;
+
 export class WaveManager {
   // spawn(type, x, y) is provided by the engine, so this class only decides
   // WHAT appears and WHEN - it never touches enemy objects directly.
@@ -59,6 +63,11 @@ export class WaveManager {
     this.waves = waves;
     this.rng = rng;
     this.reset();
+    // Aliens the player destroyed in the current wave. Escaped or rammed
+    // aliens never send 'enemy:destroyed', so they are not counted.
+    bus.on('enemy:destroyed', ({ enemy }) => {
+      if (this.active && !(enemy && enemy.isBoss)) this.kills += 1;
+    });
   }
 
   reset(spawnIntervalMultiplier = 1) {
@@ -70,6 +79,8 @@ export class WaveManager {
     this.total = 0;
     this.spawned = 0;
     this.remaining = 0;
+    this.kills = 0;
+    this.requiredKills = 0;
   }
 
   get waveNumber() {
@@ -105,10 +116,22 @@ export class WaveManager {
   startNextWave() {
     if (!this.hasMoreWaves) return false;
     this.waveIndex += 1;
+    return this.startCurrentWave();
+  }
+
+  // Starts the same wave again after it failed (not enough kills).
+  retryWave() {
+    this.waveIndex -= 1;
+    return this.startNextWave();
+  }
+
+  startCurrentWave() {
     this.queue = this.buildQueue(this.currentWave);
     this.total = this.queue.length;
     this.spawned = 0;
     this.remaining = this.total;
+    this.kills = 0;
+    this.requiredKills = Math.ceil(this.total * REQUIRED_KILL_FRACTION);
     this.timer = 0;
     this.active = true;
     this.bus.emit('wave:start', { wave: this.waveNumber, name: this.currentWave.name, total: this.totalWaves });
@@ -150,8 +173,9 @@ export class WaveManager {
     }
   }
 
-  // aliveCount = enemies currently on screen. The wave completes once every
-  // enemy has spawned and none remain.
+  // aliveCount = enemies currently on screen. The wave ends once every enemy
+  // has spawned and none remain: cleared if the player destroyed enough of
+  // them, otherwise failed (the engine then retries the same wave).
   update(dt, aliveCount) {
     if (!this.active) return;
     this.timer += dt;
@@ -164,7 +188,11 @@ export class WaveManager {
     this.remaining = this.total - this.spawned + aliveCount;
     if (this.queue.length === 0 && aliveCount === 0) {
       this.active = false;
-      this.bus.emit('wave:complete', { wave: this.waveNumber, isFinal: !this.hasMoreWaves });
+      if (this.kills >= this.requiredKills) {
+        this.bus.emit('wave:complete', { wave: this.waveNumber, isFinal: !this.hasMoreWaves });
+      } else {
+        this.bus.emit('wave:failed', { wave: this.waveNumber, kills: this.kills, required: this.requiredKills });
+      }
     }
   }
 }

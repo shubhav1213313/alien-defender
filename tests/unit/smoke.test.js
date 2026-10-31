@@ -14,16 +14,18 @@ function stubCanvas() {
   return { getContext: () => ctx };
 }
 
-// Plays a whole game headlessly through the REAL engine: the player sweeps
-// left/right firing constantly and cannot die. Every challenge is answered
+// Plays a whole game headlessly through the REAL engine: the player chases
+// the lowest alien firing constantly and cannot die. Every challenge is answered
 // with the given number of correct answers and scored by the REAL server
 // reward rules. Special invitations are accepted or ignored.
 function playFullGame({ difficulty, correctPerQuiz, acceptSpecial, specialCorrect = 1, useAbilities = false }) {
   const held = new Set(['fire']);
   const input = { isDown: (a) => held.has(a), on: () => {}, releaseAll: () => {} };
   const engine = new GameEngine({ canvas: stubCanvas(), input, rng: () => 0.2 }); // an invitation every wave
-  const log = { waves: [], challenges: [], states: [], bossPhases: [], offers: 0, abilityUses: 0 };
-  engine.bus.on('wave:start', ({ wave }) => log.waves.push(wave));
+  const log = { waves: [], failed: [], challenges: [], states: [], bossPhases: [], offers: 0, abilityUses: 0 };
+  // A wave failed for too few kills is replayed, so log only the first start.
+  engine.bus.on('wave:start', ({ wave }) => { if (!log.waves.includes(wave)) log.waves.push(wave); });
+  engine.bus.on('wave:failed', ({ wave }) => log.failed.push(wave));
   engine.bus.on('arena:open', ({ kind, wave }) => log.challenges.push(`${kind}:${wave}`));
   engine.bus.on('state:change', ({ to }) => log.states.push(to));
   engine.bus.on('boss:phase', ({ phase }) => log.bossPhases.push(phase));
@@ -49,7 +51,11 @@ function playFullGame({ difficulty, correctPerQuiz, acceptSpecial, specialCorrec
     }
     held.delete('left');
     held.delete('right');
-    held.add(Math.floor(frame / 90) % 2 ? 'left' : 'right');
+    // Steer under the nearest on-screen alien (waves need real kills); sweep otherwise.
+    const dx = (e) => Math.abs(e.x - engine.player.x);
+    const target = engine.enemies.filter((e) => e.y > 0).reduce((best, e) => (!best || dx(e) < dx(best) ? e : best), null);
+    if (!target) held.add(Math.floor(frame / 90) % 2 ? 'left' : 'right');
+    else if (Math.abs(target.x - engine.player.x) > 8) held.add(target.x < engine.player.x ? 'left' : 'right');
     if (useAbilities && frame % 150 === 0) {
       engine.abilities.addEnergy(100);
       engine.activateAbility(1 + ((frame / 150) % 5));

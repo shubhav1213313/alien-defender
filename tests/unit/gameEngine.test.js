@@ -40,7 +40,7 @@ describe('GameEngine simulation', () => {
     engine.bus.on('wave:start', waveStart);
     expect(engine.startGame()).toBe(true);
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
-    expect(engine.banner.title).toBe('WAVE 1');
+    expect(engine.banner.title).toBe('WAVE 1 STARTING');
     expect(started).toHaveBeenCalled();
     // A duplicate start (e.g. Enter + button click) is ignored.
     expect(engine.startGame()).toBe(false);

@@ -66,7 +66,7 @@ describe('Wave flow, Earth shield and end conditions', () => {
     // Finishing the arena leads to the next wave banner.
     engine.finishArena();
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
-    expect(engine.banner).toEqual({ title: 'WAVE 2', subtitle: 'Test B' });
+    expect(engine.banner).toEqual({ title: 'WAVE 2 STARTING', subtitle: 'Test B' });
   });
 
   test('clearing the final wave summons the boss (no arena before the boss)', () => {
@@ -149,5 +149,68 @@ describe('Wave flow, Earth shield and end conditions', () => {
     engine.damagePlayer(1000);
     engine.damageEarth(1000);
     expect(over).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Easy Wave 1 examples: 6 aliens, at least 3 must be destroyed by the player.
+// (A 6-alien test wave; the real waves keep their own alien counts.)
+describe('Minimum kills to clear a wave', () => {
+  const SIX = [
+    { name: 'Six', groups: [{ type: 'scout', count: 6, interval: 0.1, pattern: 'line' }] },
+    { name: 'Next', groups: [{ type: 'scout', count: 1, interval: 0.1, pattern: 'line' }] },
+  ];
+
+  // Spawns the whole wave, the player destroys `kills` aliens and the rest
+  // reach Earth (moved past the bottom edge, so they escape on the next frame).
+  function playWave1(kills) {
+    const engine = new GameEngine({ input: fakeInput(), rng: () => 0.99 });
+    const events = { complete: 0, failed: [], arena: 0, escaped: 0 };
+    engine.bus.on('wave:complete', () => { events.complete += 1; });
+    engine.bus.on('wave:failed', (e) => events.failed.push(e));
+    engine.bus.on('arena:open', () => { events.arena += 1; });
+    engine.bus.on('enemy:escaped', () => { events.escaped += 1; });
+    engine.waves.waves = SIX;
+    engine.startGame('easy');
+    step(engine, 2.6); // "WAVE 1 STARTING" banner
+    step(engine, 2); // all six spawn (easy spawns more slowly)
+    expect(engine.enemies).toHaveLength(6);
+    expect(engine.waves).toMatchObject({ total: 6, requiredKills: 3, kills: 0, remaining: 6 });
+    const earthBefore = engine.earth.shield;
+    const [hit, missed] = [engine.enemies.slice(0, kills), engine.enemies.slice(kills)];
+    for (const e of hit) engine.hitEnemy(e, 999);
+    for (const e of missed) e.y = 2000;
+    engine.update(0.016); // escapes resolve
+    engine.update(0.016); // the wave ends
+    return { engine, events, earthBefore, escapedCount: missed.length };
+  }
+
+  test.each([[0], [2]])('kills %i of 6 (rest escape) -> WAVE FAILED, no quiz, the same wave is retried', (kills) => {
+    const { engine, events, earthBefore, escapedCount } = playWave1(kills);
+    expect(events.escaped).toBe(escapedCount);
+    expect(engine.earth.shield).toBeLessThan(earthBefore); // escapes still damage Earth
+    expect(engine.waves.kills).toBe(kills); // escapes never count as kills
+    expect(events.failed).toEqual([{ wave: 1, kills, required: 3 }]);
+    expect(events.complete).toBe(0);
+    expect(events.arena).toBe(0);
+    expect(engine.stats.wavesCleared).toBe(0);
+    expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
+    expect(engine.banner.title).toBe('WAVE FAILED — NOT ENOUGH KILLS');
+    step(engine, 2.6);
+    // Retry: still wave 1, counters reset, not wave 2.
+    expect(engine.state.state).toBe(GameState.PLAYING);
+    expect(engine.waves).toMatchObject({ waveNumber: 1, kills: 0, remaining: 6, total: 6 });
+  });
+
+  test.each([[3], [6]])('kills %i of 6 -> WAVE CLEARED, then the Banana quiz, then wave 2', (kills) => {
+    const { engine, events } = playWave1(kills);
+    expect(engine.waves.kills).toBe(kills);
+    expect(events.failed).toEqual([]);
+    expect(events.complete).toBe(1);
+    expect(events.arena).toBe(1);
+    expect(engine.state.state).toBe(GameState.QUIZ);
+    engine.finishArena();
+    expect(engine.banner.title).toBe('WAVE 2 STARTING');
+    step(engine, 2.6);
+    expect(engine.waves).toMatchObject({ waveNumber: 2, kills: 0 });
   });
 });
