@@ -10,6 +10,8 @@ import { ProfileView, LeaderboardView } from './ui/PlayerViews.js';
 import { GameRecorder } from './ui/GameRecorder.js';
 import { QuoteView, ApiStatusIndicator } from './ui/InfoWidgets.js';
 import { AdminView } from './ui/AdminView.js';
+import { AudioManager } from './audio/AudioManager.js';
+import { SoundControls } from './ui/SoundControls.js';
 
 const canvas = document.getElementById('game-canvas');
 canvas.width = WORLD_WIDTH;
@@ -18,6 +20,10 @@ canvas.height = WORLD_HEIGHT;
 const input = new InputHandler(window);
 const engine = new GameEngine({ canvas, input });
 const { bus } = engine;
+
+// ---- Sound effects and music (listen to game events; start on first click/key) ----
+const audio = new AudioManager({ bus });
+new SoundControls({ audio, container: document.getElementById('sound-controls'), input });
 
 // ---- Virtual identity: account, profile, leaderboard, saved games --------
 const panels = new Panels();

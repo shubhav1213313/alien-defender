@@ -2,6 +2,29 @@
 .topbar-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .account-bar { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
 .account-bar .pilot { color: var(--accent); font-weight: 600; }
+
+/* ---- Sound menu (top bar) ------------------------------------------------ */
+.sound-controls { position: relative; }
+.sound-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 210px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
+  backdrop-filter: blur(8px);
+}
+.sound-panel[hidden] { display: none; }
+.sound-panel label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
+.sound-panel input[type="range"] { width: 100%; accent-color: var(--cyan); }
+.sound-hint { margin: 0; font-size: 0.75rem; color: var(--muted); }
 .link { background: none; border: 0; padding: 0; font: inherit; color: var(--fg); text-decoration: underline; cursor: pointer; }
 .link:hover, .link:focus-visible { color: var(--accent); }
 .warn { color: #ffd166; font-size: 0.85rem; margin: 0; }

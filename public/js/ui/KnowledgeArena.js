@@ -195,6 +195,7 @@ export class KnowledgeArena {
       });
       this.correctSoFar = result.correctCount;
       this.busy = false;
+      this.engine.bus.emit('quiz:answer', { correct: result.correct }); // for sound effects
       this.renderFeedback(result);
     } catch (err) {
       this.busy = false;

@@ -18,6 +18,8 @@
     <div class="topbar-right">
       <span id="server-status" class="status">Checking server…</span>
       <span id="api-status" class="status api-status" title="Last measured response time of the external APIs"></span>
+      <!-- Filled by SoundControls: Sound button with Mute and Music / Effects volume. -->
+      <div id="sound-controls" class="sound-controls"></div>
       <!-- Filled by AccountUI: "Log in" for guests, pilot name + Log out when signed in. -->
       <div id="account-bar" class="account-bar" aria-live="polite"></div>
     </div>
@@ -45,7 +47,7 @@
           <button class="btn small" data-panel="admin" data-requires-admin hidden>Admin Dashboard</button>
           <button class="btn small" data-panel="auth" data-guest-only>Log in / Register</button>
         </div>
-        <p class="controls">WASD / Arrows: move · Space: shoot · 1–5: abilities · P / Esc: pause · Enter: start</p>
+        <p class="controls">WASD / Arrows: move · Space: shoot · 1–5: abilities · P / Esc: pause · M: mute · Enter: start</p>
         <figure class="quote" data-quote="menu" aria-live="polite"></figure>
       </section>
 
