@@ -7,7 +7,7 @@ canvas.width = WORLD_WIDTH;
 canvas.height = WORLD_HEIGHT;
 
 const input = new InputHandler(window);
-const engine = new GameEngine({ canvas, input });
+const engine = new GameEngine({ canvas, input, useTrainingSpawner: true });
 const { bus } = engine;
 
 // ---- Overlay screens follow the game state (event-driven UI) -------------
@@ -19,7 +19,8 @@ bus.on('state:change', ({ to }) => showOverlayFor(to));
 
 bus.on('game:over', ({ survivedSeconds }) => {
   document.getElementById('gameover-summary').textContent =
-    `You held the line for ${survivedSeconds.toFixed(1)} seconds.`;
+    `Score ${engine.score.toLocaleString()} · ${engine.stats.enemiesDestroyed} aliens destroyed · ` +
+    `survived ${survivedSeconds.toFixed(1)}s`;
 });
 
 // ---- Button events ---------------------------------------------------------
