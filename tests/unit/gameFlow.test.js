@@ -63,20 +63,56 @@ describe('Wave flow, Earth shield and end conditions', () => {
     expect(engine.banner).toEqual({ title: 'WAVE 2', subtitle: 'Test B' });
   });
 
-  test('clearing the final wave triggers victory with a summary', () => {
+  test('clearing the final wave summons the boss instead of a sixth wave', () => {
     const engine = new GameEngine({ input: fakeInput() });
-    const victory = jest.fn();
-    engine.bus.on('game:victory', victory);
+    const bossSpawn = jest.fn();
+    const waveStart = jest.fn();
+    engine.bus.on('boss:spawn', bossSpawn);
     engine.waves.waves = TINY_WAVES;
     engine.startGame('hard');
+    engine.bus.on('wave:start', waveStart);
     for (let wave = 0; wave < 2; wave += 1) {
       step(engine, 2.6);
       step(engine, 1);
       killAllEnemies(engine);
       engine.update(0.016);
     }
+    expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
+    expect(engine.banner.title).toBe('WARNING');
+    step(engine, 2.6);
+    expect(bossSpawn).toHaveBeenCalled();
+    expect(engine.boss.alive).toBe(true);
+    expect(waveStart).toHaveBeenCalledTimes(2); // no "wave 3"
+  });
+
+  test('destroying the boss wins the game and clears its escorts and bullets', () => {
+    const engine = new GameEngine({ input: fakeInput() });
+    const victory = jest.fn();
+    engine.bus.on('game:victory', victory);
+    engine.waves.waves = TINY_WAVES.slice(0, 1);
+    engine.startGame('normal');
+    step(engine, 2.6);
+    step(engine, 1);
+    killAllEnemies(engine);
+    engine.update(0.016);
+    step(engine, 2.6); // warning banner
+    step(engine, 4); // boss entrance
+    engine.spawnEnemy('scout', 100, 100);
+    engine.boss.phaseShield = 0;
+    engine.hitEnemy(engine.boss, engine.boss.health);
     expect(engine.state.state).toBe(GameState.VICTORY);
-    expect(victory).toHaveBeenCalledWith(expect.objectContaining({ reason: 'victory', difficulty: 'hard', wavesCleared: 2 }));
+    expect(engine.enemies.filter((e) => e.alive)).toHaveLength(0);
+    expect(engine.projectiles.some((p) => p.owner === 'enemy')).toBe(false);
+    expect(victory).toHaveBeenCalledWith(expect.objectContaining({ reason: 'victory', bossDefeated: true }));
+  });
+
+  test('ramming the boss hurts the player but does not destroy the boss', () => {
+    const engine = new GameEngine({ input: fakeInput() });
+    engine.startGame();
+    engine.spawnBoss();
+    engine.bus.emit('collision:playerRammed', { enemy: engine.boss, damage: 40 });
+    expect(engine.boss.alive).toBe(true);
+    expect(engine.player.health + engine.player.shield).toBeLessThan(125);
   });
 
   test('pausing during a wave banner resumes back into the banner', () => {
