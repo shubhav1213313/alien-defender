@@ -1,8 +1,12 @@
 const crypto = require('crypto');
 const { KINDS, DIFFICULTIES, validWave, calculateRewards } = require('./arenaRules');
+const { fixedQuestionsFor, FIXED_SOURCE } = require('./fixedQuizQuestions');
 
 // Seconds of network grace allowed on top of the visible time limit.
 const SUBMIT_GRACE_SECONDS = 3;
+// Extra Banana fetches allowed when the API repeats a puzzle already used in
+// the same challenge, before giving up with a 503 (Retry / Continue).
+const DUPLICATE_REFETCHES = 3;
 
 class ChallengeError extends Error {
   constructor(message, status, code) {
@@ -83,18 +87,22 @@ class ChallengeService {
     };
   }
 
-  // Returns the current question, fetching a genuine Banana puzzle the first
-  // time. Asking again returns the SAME puzzle (no rerolling). If the API is
-  // down the error propagates (503) and nothing is stored, so Retry works.
+  // Returns the current question. Waves 1-3 use the LOCAL FIXED questions in
+  // their fixed order; everything else fetches a genuine Banana puzzle the
+  // first time. Asking again returns the SAME question (no rerolling). If the
+  // API is down the error propagates (503) and nothing is stored, so Retry works.
   async getQuestion(id, requesterId = null) {
     const arena = this.getArena(id, requesterId);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
     const index = arena.currentIndex;
     if (!arena.questions[index]) {
-      const puzzle = await this.puzzles.getPuzzle();
-      // Another request may have stored a puzzle while we were waiting.
+      const fixed = fixedQuestionsFor(arena.kind, arena.wave);
+      const question = fixed
+        ? { text: fixed[index].text, solution: fixed[index].solution, image: null, source: FIXED_SOURCE, latencyMs: null }
+        : await this.freshPuzzle(arena);
+      // Another request may have stored a question while we were waiting.
       if (!arena.questions[index]) {
-        arena.questions[index] = { ...puzzle, index, issuedAt: this.now(), answered: false, hintUsed: false };
+        arena.questions[index] = { ...question, index, issuedAt: this.now(), answered: false, hintUsed: false };
       }
     }
     const q = arena.questions[index];
@@ -103,6 +111,7 @@ class ChallengeService {
       questionIndex: index,
       questionNumber: index + 1,
       totalQuestions: arena.rules.questions,
+      text: q.text || null,
       image: q.image,
       source: q.source,
       latencyMs: q.latencyMs,
@@ -110,6 +119,18 @@ class ChallengeService {
       secondsRemaining: Math.max(0, arena.rules.timeLimitSeconds - Math.floor((this.now() - q.issuedAt) / 1000)),
       hintAvailable: arena.rules.hintsAllowed && !q.hintUsed,
     };
+  }
+
+  // A Banana puzzle not already used in this challenge (compared by image).
+  async freshPuzzle(arena) {
+    const used = new Set(arena.questions.filter(Boolean).map((q) => q.image));
+    for (let attempt = 0; attempt <= DUPLICATE_REFETCHES; attempt += 1) {
+      const puzzle = await this.puzzles.getPuzzle();
+      if (!used.has(puzzle.image)) return puzzle;
+    }
+    const err = new ChallengeError('The Banana API kept repeating the same puzzle. Retry, or continue without the ability.', 503, 'PUZZLE_API_UNAVAILABLE');
+    err.expose = true; // safe message, shown to the player
+    throw err;
   }
 
   // One scored submission per question. `answer` null = time ran out.
@@ -174,4 +195,4 @@ class ChallengeService {
   }
 }
 
-module.exports = { ChallengeService, ChallengeError, SUBMIT_GRACE_SECONDS };
+module.exports = { ChallengeService, ChallengeError, SUBMIT_GRACE_SECONDS, DUPLICATE_REFETCHES };

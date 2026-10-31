@@ -8,8 +8,9 @@ const SOLUTION = 7;
 
 function setup() {
   let clock = Date.now();
+  let image = 0; // every mocked Banana puzzle is a different picture
   const challengeService = new ChallengeService({
-    puzzleProvider: { getPuzzle: async () => ({ image: 'data:image/png;base64,AAAA', solution: SOLUTION, source: 'banana', latencyMs: 1 }) },
+    puzzleProvider: { getPuzzle: async () => ({ image: `data:image/png;base64,AAAA${(image += 1)}`, solution: SOLUTION, source: 'banana', latencyMs: 1 }) },
   });
   const { app, repositories } = createTestApp({ challengeService, now: () => clock });
   // Game sessions record their real start time; moving the server clock
@@ -31,7 +32,7 @@ const result = (overrides = {}) => ({
 
 const VICTORY = result({ outcome: 'victory', score: 98000, waveReached: 5, wavesCleared: 5, enemiesDestroyed: 120, maxCombo: 30, shotsFired: 3000, shotsHit: 1400, bossDefeated: true });
 
-async function playArena(agent, gameSessionId, { kind = 'wave', wave = 1, difficulty = 'normal', correct = 2 } = {}) {
+async function playArena(agent, gameSessionId, { kind = 'wave', wave = 4, difficulty = 'normal', correct = 2 } = {}) {
   const { body } = await agent.post('/api/challenges').send({ kind, wave, difficulty, gameSessionId }).expect(201);
   const id = body.data.arenaId;
   for (let i = 0; i < body.data.totalQuestions; i += 1) {
@@ -172,7 +173,7 @@ describe('Achievements, profile and leaderboard', () => {
     const agent = await player(app);
     let { body } = await agent.post('/api/games').send({ difficulty: 'hard' });
     const first = body.data.gameSessionId;
-    await playArena(agent, first, { wave: 1, correct: 2 });
+    await playArena(agent, first, { wave: 4, correct: 2 });
     advance(600);
     const res = await agent.post(`/api/games/${first}/result`).send(VICTORY);
     const ids = res.body.data.newAchievements.map((a) => a.id).sort();
