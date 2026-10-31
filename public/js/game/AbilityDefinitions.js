@@ -1,85 +1,50 @@
-// Special abilities unlocked in the Knowledge Challenge Arena.
-// Each wave's arena offers one ability slot (activated with keys 1-4):
-//   standard - unlocked with 3/4 (or 4/4 on Easy)
-//   enhanced - the standard ability with +50% duration/power and -25% cost (4/4 on Normal)
-//   elite    - a stronger version (4/4 on Hard)
-// apply(engine, stats) performs the effect; stats holds the tier-adjusted
-// duration and power so one definition serves both standard and enhanced.
-export const TIER_RANK = { standard: 1, enhanced: 2, elite: 3 };
-
+// Special abilities unlocked by solving Banana puzzles.
+//   keys 1-4: solve BOTH puzzles of the compulsory quiz after waves 1-4
+//   key  5  : VOID STORM - solve the optional special puzzle during combat
+// Each ability has a different real effect, an energy cost (Knowledge
+// Energy, earned by correct answers), a cooldown and - for timed effects - a
+// duration shown on the HUD. apply(engine) performs the effect.
 export const ABILITIES = Object.freeze({
-  miniShield: {
-    id: 'miniShield', slot: 1, name: 'Mini Shield', cost: 20, cooldown: 12, duration: 0,
-    description: 'Instantly restores 25 shield.',
-    apply(engine, { power }) {
-      engine.player.addShield(25 * power);
+  plasmaShield: {
+    id: 'plasmaShield', slot: 1, name: 'Plasma Shield', short: 'SHLD', color: '#50aaff',
+    cost: 20, cooldown: 18, duration: 6,
+    description: 'A plasma barrier for 6 s: you take no damage and enemy bullets touching it are destroyed.',
+    apply(engine) {
+      engine.player.effects.plasmaShield = this.duration;
     },
   },
-  ghostMode: {
-    id: 'ghostMode', slot: 1, name: 'Ghost Mode', cost: 30, cooldown: 20, duration: 5,
-    description: 'Phase out of reality: immune to all damage for 5s.',
-    apply(engine, { duration }) {
-      engine.player.effects.ghost = Math.max(engine.player.effects.ghost, duration);
+  hyperBlaster: {
+    id: 'hyperBlaster', slot: 2, name: 'Hyper Blaster', short: 'HYPR', color: '#ff9f1c',
+    cost: 25, cooldown: 16, duration: 8,
+    description: 'For 8 s you fire 2.5x faster and every shot does double damage.',
+    apply(engine) {
+      engine.player.effects.hyperBlaster = this.duration;
     },
   },
-  rapidFire: {
-    id: 'rapidFire', slot: 2, name: 'Rapid Fire', cost: 25, cooldown: 15, duration: 6,
-    description: 'Fire 2.5x faster for 6s.',
-    apply(engine, { duration }) {
-      engine.player.effects.rapidFire = Math.max(engine.player.effects.rapidFire, duration);
+  tripleBeam: {
+    id: 'tripleBeam', slot: 3, name: 'Triple Beam', short: 'TRPL', color: '#c77dff',
+    cost: 25, cooldown: 16, duration: 10,
+    description: 'For 10 s every shot splits into three beams.',
+    apply(engine) {
+      engine.player.effects.tripleBeam = this.duration;
     },
   },
-  phantomOverdrive: {
-    id: 'phantomOverdrive', slot: 2, name: 'Phantom Overdrive', cost: 40, cooldown: 25, duration: 6,
-    description: 'Invisible (aliens cannot aim at you), invulnerable and rapid fire for 6s.',
-    apply(engine, { duration }) {
-      const fx = engine.player.effects;
-      fx.ghost = Math.max(fx.ghost, duration);
-      fx.invisible = Math.max(fx.invisible, duration);
-      fx.rapidFire = Math.max(fx.rapidFire, duration);
+  empShockwave: {
+    id: 'empShockwave', slot: 4, name: 'EMP Shockwave', short: 'EMP', color: '#7bdff2',
+    cost: 35, cooldown: 22, duration: 0,
+    description: 'Destroys all enemy bullets, deals 4 damage to every alien (15 to the boss) and stuns aliens for 2 s.',
+    apply(engine) {
+      engine.empShockwave({ damage: 4, bossDamage: 15, stunSeconds: 2 });
     },
   },
-  tripleLaser: {
-    id: 'tripleLaser', slot: 3, name: 'Triple Laser', cost: 25, cooldown: 15, duration: 8,
-    description: 'Every shot splits into three for 8s.',
-    apply(engine, { duration }) {
-      engine.player.effects.tripleShot = Math.max(engine.player.effects.tripleShot, duration);
-    },
-  },
-  timeFreezeLaser: {
-    id: 'timeFreezeLaser', slot: 3, name: 'Time Freeze + Triple Laser', cost: 40, cooldown: 30, duration: 8,
-    description: 'Freezes every alien and alien bullet for 4s, plus Triple Laser for 8s.',
-    apply(engine, { duration }) {
-      engine.timeFreeze = Math.max(engine.timeFreeze, 4);
-      engine.player.effects.tripleShot = Math.max(engine.player.effects.tripleShot, duration);
-    },
-  },
-  empBlast: {
-    id: 'empBlast', slot: 4, name: 'EMP Blast', cost: 35, cooldown: 20, duration: 0,
-    description: 'Destroys all alien bullets and deals 3 damage to every alien on screen.',
-    apply(engine, { power }) {
-      engine.shockwave({ damage: Math.round(3 * power), bossDamage: Math.round(12 * power), color: '#7bdff2' });
-    },
-  },
-  ultimateNova: {
-    id: 'ultimateNova', slot: 4, name: 'Ultimate Nova', cost: 50, cooldown: 35, duration: 2,
-    description: 'Massive blast: clears bullets, 10 damage to every alien, heavy boss damage, 2s invulnerability.',
-    apply(engine, { duration }) {
-      engine.shockwave({ damage: 10, bossDamage: 40, color: '#ffd166' });
-      engine.player.effects.ghost = Math.max(engine.player.effects.ghost, duration);
+  voidStorm: {
+    id: 'voidStorm', slot: 5, name: 'VOID STORM', short: 'VOID', color: '#f72585',
+    cost: 50, cooldown: 40, duration: 6,
+    description: 'Legendary: for 6 s lightning strikes up to 3 aliens every 0.4 s (3 damage each; 2 to the boss).',
+    apply(engine) {
+      engine.startVoidStorm(this.duration);
     },
   },
 });
 
-// Tier-adjusted numbers for display and activation.
-export function abilityStats(abilityId, tier) {
-  const def = ABILITIES[abilityId];
-  if (!def) throw new Error(`Unknown ability: ${abilityId}`);
-  const enhanced = tier === 'enhanced';
-  return {
-    cost: enhanced ? Math.round(def.cost * 0.75) : def.cost,
-    cooldown: def.cooldown,
-    duration: enhanced ? def.duration * 1.5 : def.duration,
-    power: enhanced ? 1.5 : 1,
-  };
-}
+export const ABILITY_IDS = Object.keys(ABILITIES);

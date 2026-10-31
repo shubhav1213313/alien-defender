@@ -1,4 +1,4 @@
-// Integration tests for the Knowledge Challenge Arena REST API.
+// Integration tests for the Knowledge Challenge REST API.
 // The Banana API is MOCKED here (see tests/live for the real connectivity check).
 const request = require('supertest');
 const { createTestApp } = require('../helpers/testApp');
@@ -6,165 +6,140 @@ const { ChallengeService } = require('../../src/services/challengeService');
 const { PuzzleService } = require('../../src/services/puzzleService');
 const { BananaApiError } = require('../../src/services/bananaService');
 
-const SOLUTIONS = [2, 8, 5, 0];
+const SOLUTIONS = [2, 8, 5];
 
 function appWith(fetchPuzzle) {
   let i = 0;
   const puzzles = new PuzzleService({
-    fetchPuzzle: fetchPuzzle || (async () => ({ image: 'data:image/png;base64,AAAA', solution: SOLUTIONS[i++ % 4], source: 'banana', latencyMs: 250 })),
+    fetchPuzzle: fetchPuzzle || (async () => ({ image: 'data:image/png;base64,AAAA', solution: SOLUTIONS[i++ % SOLUTIONS.length], source: 'banana', latencyMs: 250 })),
     logger: { warn: () => {} },
   });
   return createTestApp({ challengeService: new ChallengeService({ puzzleProvider: puzzles }) }).app;
 }
 
-async function startArena(app, wave = 1, difficulty = 'normal') {
-  const res = await request(app).post('/api/challenges').send({ wave, difficulty });
+async function start(app, body = { kind: 'wave', wave: 1 }) {
+  const res = await request(app).post('/api/challenges').send(body);
   expect(res.status).toBe(201);
   return res.body.data.arenaId;
 }
 
-async function playArena(app, id, answers) {
-  for (let i = 0; i < 4; i += 1) {
+async function play(app, id, answers) {
+  for (let i = 0; i < answers.length; i += 1) {
     await request(app).get(`/api/challenges/${id}/question`).expect(200);
     await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: answers[i] }).expect(200);
   }
 }
 
 describe('GET /api/challenges/rules', () => {
-  test('returns all three difficulties with reward tables', async () => {
-    const res = await request(appWith()).get('/api/challenges/rules?wave=2');
+  test('post-wave quiz: 2 puzzles and the reward preview', async () => {
+    const res = await request(appWith()).get('/api/challenges/rules?kind=wave&wave=2');
     expect(res.status).toBe(200);
-    expect(res.body.data.difficulties.map((d) => d.id)).toEqual(['easy', 'normal', 'hard']);
-    expect(res.body.data.abilities).toEqual({ standard: 'rapidFire', elite: 'phantomOverdrive' });
+    expect(res.body.data).toMatchObject({ kind: 'wave', questions: 2, preview: 'SOLVE BOTH PUZZLES TO UNLOCK HYPER BLASTER',
+      ability: { id: 'hyperBlaster', name: 'Hyper Blaster', slot: 2 } });
   });
 
-  test('rejects an invalid wave with 400', async () => {
-    const res = await request(appWith()).get('/api/challenges/rules?wave=9');
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
+  test('special puzzle: 1 puzzle for VOID STORM', async () => {
+    const res = await request(appWith()).get('/api/challenges/rules?kind=special&wave=3');
+    expect(res.body.data).toMatchObject({ questions: 1, hintsAllowed: false, ability: { id: 'voidStorm' } });
+  });
+
+  test.each(['kind=wave&wave=5', 'kind=bonus&wave=1', 'kind=upgrade&wave=1', 'wave=9'])('rejects %s with 400', async (q) => {
+    expect((await request(appWith()).get(`/api/challenges/rules?${q}`)).status).toBe(400);
   });
 });
 
-describe('Arena lifecycle', () => {
-  test('creates an arena for the chosen difficulty', async () => {
-    const res = await request(appWith()).post('/api/challenges').send({ wave: 3, difficulty: 'hard' });
+describe('Challenge lifecycle', () => {
+  test('creates a 2-question wave quiz', async () => {
+    const res = await request(appWith()).post('/api/challenges').send({ kind: 'wave', wave: 3 });
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ wave: 3, difficulty: 'hard', timeLimitSeconds: 20, hintsAllowed: false, totalQuestions: 4 });
+    expect(res.body.data).toMatchObject({ kind: 'wave', wave: 3, totalQuestions: 2, hintsAllowed: true });
   });
 
-  test.each([
-    [{ wave: 1 }, 'difficulty'],
-    [{ wave: 'abc', difficulty: 'easy' }, 'wave'],
-    [{ wave: 1, difficulty: 'impossible' }, 'difficulty'],
-  ])('rejects invalid body %o with 400', async (body, field) => {
-    const res = await request(appWith()).post('/api/challenges').send(body);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(field);
-  });
-
-  test('question responses contain the image but never the solution', async () => {
+  test('question responses contain the genuine image but never the solution', async () => {
     const app = appWith();
-    const id = await startArena(app);
+    const id = await start(app);
     const res = await request(app).get(`/api/challenges/${id}/question`);
-    expect(res.status).toBe(200);
-    expect(res.body.data).toMatchObject({ questionNumber: 1, totalQuestions: 4, source: 'banana', latencyMs: 250 });
+    expect(res.body.data).toMatchObject({ questionNumber: 1, totalQuestions: 2, source: 'banana', latencyMs: 250 });
+    expect(res.body.data.image).toMatch(/^data:image\/png;base64,/);
     expect(JSON.stringify(res.body)).not.toMatch(/solution/);
   });
 
-  test('correct and incorrect answers are marked, with the right answer revealed', async () => {
+  test.each([
+    [[2, 8], 2, 'plasmaShield'],
+    [[2, 0], 1, null],
+    [[0, 0], 0, null],
+  ])('answers %p -> %i/2, ability %p', async (answers, correct, ability) => {
     const app = appWith();
-    const id = await startArena(app);
-    await request(app).get(`/api/challenges/${id}/question`);
-    const right = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer: '2' });
-    expect(right.body.data).toMatchObject({ correct: true, correctAnswer: 2 });
-    await request(app).get(`/api/challenges/${id}/question`);
-    const wrong = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 1, answer: 3 });
-    expect(wrong.body.data).toMatchObject({ correct: false, correctAnswer: 8, answered: 2 });
+    const id = await start(app);
+    await play(app, id, answers);
+    const { body } = await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+    expect(body.data).toMatchObject({ correct, total: 2 });
+    expect(body.data.ability ? body.data.ability.id : null).toBe(ability);
+    expect((await request(app).post(`/api/challenges/${id}/claim`)).status).toBe(409); // no duplicate rewards
+  });
+
+  test('special puzzle: 1 correct answer unlocks VOID STORM', async () => {
+    const app = appWith();
+    const id = await start(app, { kind: 'special', wave: 2 });
+    await play(app, id, [2]);
+    const { body } = await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+    expect(body.data.ability).toEqual({ id: 'voidStorm', name: 'VOID STORM', slot: 5 });
   });
 
   test('duplicate submissions are rejected with 409', async () => {
     const app = appWith();
-    const id = await startArena(app);
+    const id = await start(app);
     await request(app).get(`/api/challenges/${id}/question`);
     await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer: 9 }).expect(200);
-    const again = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer: 2 });
-    expect(again.status).toBe(409);
+    expect((await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer: 2 })).status).toBe(409);
   });
 
-  test.each([['abc'], ['-1'], ['1.5'], ['1000'], [{ $gt: 0 }]])('invalid answer %p is rejected with 400', async (answer) => {
+  test.each([['abc'], ['-1'], ['1.5'], ['1000'], [{ $gt: 0 }]])('invalid answer %p -> 400', async (answer) => {
     const app = appWith();
-    const id = await startArena(app);
+    const id = await start(app);
     await request(app).get(`/api/challenges/${id}/question`);
-    const res = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer });
-    expect(res.status).toBe(400);
+    expect((await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer })).status).toBe(400);
   });
 
-  test('rewards: 409 before completion, then once only', async () => {
+  test('hint: 200 on a wave quiz, 403 on the special puzzle', async () => {
     const app = appWith();
-    const id = await startArena(app, 4, 'hard');
-    expect((await request(app).post(`/api/challenges/${id}/claim`)).status).toBe(409);
-    await playArena(app, id, SOLUTIONS);
-    const claim = await request(app).post(`/api/challenges/${id}/claim`);
-    expect(claim.status).toBe(200);
-    expect(claim.body.data).toMatchObject({ correct: 4, ability: { id: 'ultimateNova', tier: 'elite', slot: 4 } });
-    const again = await request(app).post(`/api/challenges/${id}/claim`);
-    expect(again.status).toBe(409);
-  });
-
-  test.each([
-    [[2, 8, 5, 0], 4], [[2, 8, 5, 9], 3], [[2, 8, 9, 9], 2], [[2, 9, 9, 9], 1], [[9, 9, 9, 9], 0],
-  ])('answers %p score %i/4 and the matching tier', async (answers, expected) => {
-    const app = appWith();
-    const id = await startArena(app, 2, 'normal');
-    await playArena(app, id, answers);
-    const { body } = await request(app).post(`/api/challenges/${id}/claim`);
-    expect(body.data.correct).toBe(expected);
-    expect(body.data.ability ? body.data.ability.tier : null).toBe({ 4: 'enhanced', 3: 'standard' }[expected] || null);
-  });
-
-  test('hint endpoint: 200 on Easy, 403 on Hard', async () => {
-    const app = appWith();
-    const easy = await startArena(app, 1, 'easy');
-    await request(app).get(`/api/challenges/${easy}/question`);
-    const ok = await request(app).post(`/api/challenges/${easy}/hint`);
-    expect(ok.status).toBe(200);
-    expect(ok.body.data.hint).toMatch(/even|odd/);
-    const hard = await startArena(app, 1, 'hard');
-    await request(app).get(`/api/challenges/${hard}/question`);
-    expect((await request(app).post(`/api/challenges/${hard}/hint`)).status).toBe(403);
-  });
-
-  test('unknown arena ids return 404', async () => {
-    const res = await request(appWith()).get('/api/challenges/does-not-exist/question');
-    expect(res.status).toBe(404);
+    const wave = await start(app);
+    await request(app).get(`/api/challenges/${wave}/question`);
+    expect((await request(app).post(`/api/challenges/${wave}/hint`)).body.data.hint).toMatch(/even|odd/);
+    const special = await start(app, { kind: 'special', wave: 1 });
+    await request(app).get(`/api/challenges/${special}/question`);
+    expect((await request(app).post(`/api/challenges/${special}/hint`)).status).toBe(403);
   });
 });
 
-describe('Banana API outage', () => {
-  test('a timed-out Banana API falls back to a labelled offline puzzle, and the arena still completes', async () => {
-    const app = appWith(async () => { throw new BananaApiError('Banana API timed out after 4000ms', 'TIMEOUT'); });
-    const id = await startArena(app);
-    const q = await request(app).get(`/api/challenges/${id}/question`);
-    expect(q.status).toBe(200);
-    expect(q.body.data).toMatchObject({ source: 'offline', fallbackReason: 'TIMEOUT' });
-    expect(q.body.data.image).toMatch(/^data:image\/svg\+xml;base64,/);
-    await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: 0, answer: 1 }).expect(200);
-    for (let i = 1; i < 4; i += 1) {
-      await request(app).get(`/api/challenges/${id}/question`).expect(200);
-      await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: 1 }).expect(200);
-    }
-    expect((await request(app).post(`/api/challenges/${id}/claim`)).status).toBe(200);
+describe('Banana API outage (no fabricated puzzles)', () => {
+  test('503 with a clear message and code; Retry succeeds once the API is back', async () => {
+    let down = true;
+    let i = 0;
+    const app = appWith(async () => {
+      if (down) throw new BananaApiError('Banana API timed out after 4000ms', 'TIMEOUT');
+      return { image: 'data:image/png;base64,AAAA', solution: SOLUTIONS[i++], source: 'banana', latencyMs: 9 };
+    });
+    const id = await start(app);
+    const fail = await request(app).get(`/api/challenges/${id}/question`);
+    expect(fail.status).toBe(503);
+    expect(fail.body).toEqual({ success: false, code: 'PUZZLE_API_UNAVAILABLE',
+      error: 'The Banana puzzle service is unavailable right now. Retry, or continue without the ability.' });
+    down = false;
+    const retry = await request(app).get(`/api/challenges/${id}/question`);
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.source).toBe('banana');
   });
 });
 
 describe('Rate limiting', () => {
-  test('creating too many arenas in a minute returns 429', async () => {
+  test('creating too many challenges in a minute returns 429', async () => {
     const { app } = createTestApp({
       challengeService: new ChallengeService({ puzzleProvider: { getPuzzle: async () => ({}) } }),
       rateLimiting: true,
     });
     let last;
-    for (let i = 0; i < 21; i += 1) last = await request(app).post('/api/challenges').send({ wave: 1, difficulty: 'easy' });
+    for (let i = 0; i < 21; i += 1) last = await request(app).post('/api/challenges').send({ kind: 'wave', wave: 1 });
     expect(last.status).toBe(429);
   });
 });

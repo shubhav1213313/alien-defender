@@ -4,7 +4,7 @@ const { validatePassword } = require('../../src/validation/authValidation');
 
 const baseResult = { outcome: 'destroyed', score: 0, waveReached: 1, wavesCleared: 0, enemiesDestroyed: 0, maxCombo: 0, shotsFired: 0, shotsHit: 0, abilitiesUsed: 0, bossDefeated: false };
 const noTotals = { enemiesDestroyed: 0 };
-const noQuiz = { correct: 0, total: 0, perfectCount: 0, legendaryCount: 0 };
+const noQuiz = { correct: 0, total: 0, perfectCount: 0, legendaryCount: 0, specialSolved: 0 };
 const earned = (result = {}, totals = {}, quiz = {}, difficulty = 'normal') =>
   earnedAchievements({ result: { ...baseResult, ...result }, totals: { ...noTotals, ...totals }, quiz: { ...noQuiz, ...quiz }, difficulty });
 
@@ -23,6 +23,7 @@ describe('Achievement rules', () => {
     ['perfect_quiz', {}, {}, { perfectCount: 1 }],
     ['knowledge_master', {}, {}, { correct: 50 }],
     ['legendary_defender', {}, {}, { legendaryCount: 1 }],
+    ['storm_caller', {}, {}, { specialSolved: 1 }],
   ])('%s unlocks from its condition', (id, result, totals, quiz) => {
     expect(earned(result, totals, quiz)).toContain(id);
   });
@@ -41,11 +42,12 @@ describe('Achievement rules', () => {
     expect(earned({ outcome: 'victory' }, {}, {}, 'normal')).not.toContain('hard_victory');
   });
 
-  test('rule ids match the ten achievements in the migration', () => {
+  test('rule ids match the eleven achievements in the migrations', () => {
     const fs = require('fs');
-    const sql = fs.readFileSync(require.resolve('../../database/migrations/001_initial_schema.sql'), 'utf8');
+    const sql = ['001_initial_schema.sql', '002_quiz_kinds_and_void_storm.sql']
+      .map((f) => fs.readFileSync(require.resolve(`../../database/migrations/${f}`), 'utf8')).join('\n');
     for (const id of ACHIEVEMENT_IDS) expect(sql).toContain(`('${id}',`);
-    expect(ACHIEVEMENT_IDS).toHaveLength(10);
+    expect(ACHIEVEMENT_IDS).toHaveLength(11);
   });
 });
 

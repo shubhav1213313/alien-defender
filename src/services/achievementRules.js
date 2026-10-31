@@ -16,6 +16,7 @@ const RULES = {
   knowledge_master: ({ quiz }) => quiz.correct >= 50,
   hard_victory: ({ result, difficulty }) => result.outcome === 'victory' && difficulty === 'hard',
   legendary_defender: ({ quiz }) => quiz.legendaryCount >= 1,
+  storm_caller: ({ quiz }) => quiz.specialSolved >= 1,
 };
 
 function earnedAchievements(context) {

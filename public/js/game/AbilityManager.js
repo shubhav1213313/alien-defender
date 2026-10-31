@@ -1,10 +1,9 @@
-import { ABILITIES, TIER_RANK, abilityStats } from './AbilityDefinitions.js';
+import { ABILITIES } from './AbilityDefinitions.js';
 
 export const MAX_ENERGY = 100;
 
 // Holds Knowledge Energy, unlocked ability slots and cooldowns.
-// Unlocked abilities stay available for the rest of the game; a slot is
-// only ever upgraded (standard -> enhanced -> elite), never downgraded.
+// An unlocked ability stays available for the rest of the game.
 export class AbilityManager {
   constructor(bus) {
     this.bus = bus;
@@ -14,7 +13,7 @@ export class AbilityManager {
   reset() {
     this.energy = 0;
     this.maxEnergy = MAX_ENERGY;
-    this.slots = new Map(); // slot number -> { id, tier }
+    this.slots = new Map(); // slot number -> ability id
     this.cooldowns = new Map(); // slot number -> seconds remaining
   }
 
@@ -25,22 +24,27 @@ export class AbilityManager {
     return this.energy - before;
   }
 
-  unlock(abilityId, tier) {
+  has(abilityId) {
     const def = ABILITIES[abilityId];
-    if (!def || !TIER_RANK[tier]) throw new Error(`Cannot unlock ${abilityId} (${tier})`);
-    const current = this.slots.get(def.slot);
-    if (current && TIER_RANK[current.tier] > TIER_RANK[tier]) return false;
-    if (current && current.id === abilityId && current.tier === tier) return false;
-    this.slots.set(def.slot, { id: abilityId, tier });
-    this.bus.emit('ability:unlocked', { slot: def.slot, id: abilityId, tier, name: def.name });
+    return Boolean(def) && this.slots.get(def.slot) === abilityId;
+  }
+
+  // Returns false if it was already unlocked (no duplicate unlock events).
+  unlock(abilityId) {
+    const def = ABILITIES[abilityId];
+    if (!def) throw new Error(`Unknown ability: ${abilityId}`);
+    if (this.has(abilityId)) return false;
+    this.slots.set(def.slot, abilityId);
+    this.bus.emit('ability:unlocked', { slot: def.slot, id: abilityId, name: def.name });
     return true;
   }
 
   slotInfo(slot) {
-    const entry = this.slots.get(slot);
-    if (!entry) return null;
-    const def = ABILITIES[entry.id];
-    return { slot, ...entry, name: def.name, description: def.description, ...abilityStats(entry.id, entry.tier), cooldownLeft: this.cooldowns.get(slot) || 0 };
+    const id = this.slots.get(slot);
+    if (!id) return null;
+    const def = ABILITIES[id];
+    return { slot, id, name: def.name, short: def.short, color: def.color, description: def.description,
+      cost: def.cost, cooldown: def.cooldown, duration: def.duration, cooldownLeft: this.cooldowns.get(slot) || 0 };
   }
 
   // Returns null if the ability can be used, otherwise the reason it cannot.
@@ -61,8 +65,8 @@ export class AbilityManager {
     const info = this.slotInfo(slot);
     this.energy -= info.cost;
     this.cooldowns.set(slot, info.cooldown);
-    ABILITIES[info.id].apply(engine, info);
-    this.bus.emit('ability:activated', { slot, id: info.id, tier: info.tier, name: info.name, energy: this.energy });
+    ABILITIES[info.id].apply(engine);
+    this.bus.emit('ability:activated', { slot, id: info.id, name: info.name, energy: this.energy });
     return { ok: true };
   }
 

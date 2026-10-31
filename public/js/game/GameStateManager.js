@@ -17,7 +17,8 @@ const TRANSITIONS = {
   [MENU]: [PLAYING],
   [PLAYING]: [PAUSED, QUIZ, WAVE_TRANSITION, GAME_OVER, VICTORY, MENU],
   [PAUSED]: [PLAYING, WAVE_TRANSITION, MENU], // resumes whichever state was paused
-  [QUIZ]: [WAVE_TRANSITION, VICTORY, MENU], // arena -> next wave, or post-boss -> victory
+  // quiz -> next wave banner (compulsory), victory (bonus) or back to combat (special)
+  [QUIZ]: [WAVE_TRANSITION, VICTORY, PLAYING, MENU],
   [WAVE_TRANSITION]: [PLAYING, QUIZ, PAUSED, GAME_OVER, MENU],
   [GAME_OVER]: [PLAYING, MENU],
   [VICTORY]: [PLAYING, MENU],

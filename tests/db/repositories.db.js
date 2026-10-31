@@ -33,7 +33,7 @@ describe('Migration', () => {
     const [tables] = await pool.query('SHOW TABLES');
     const names = tables.map((t) => Object.values(t)[0]).sort();
     expect(names).toEqual(['achievements', 'game_sessions', 'quiz_attempts', 'schema_migrations', 'scores', 'sessions', 'user_achievements', 'users']);
-    expect(await repos.achievements.all()).toHaveLength(10);
+    expect(await repos.achievements.all()).toHaveLength(11);
   });
 
   test('running it again applies nothing', async () => {
@@ -109,10 +109,12 @@ describe('GameRepository + QuizAttemptRepository + AchievementRepository', () =>
 
   test('quiz totals per session and per user', async () => {
     const s = await repos.games.startSession(userId, 'normal');
-    await repos.quizAttempts.record({ userId, gameSessionId: s, wave: 1, difficulty: 'easy', correct: 4, total: 4 });
-    await repos.quizAttempts.record({ userId, gameSessionId: s, wave: 5, difficulty: 'hard', correct: 4, total: 4 });
-    expect(await repos.quizAttempts.totalsForSession(s)).toEqual({ correct: 8, total: 8 });
-    expect(await repos.quizAttempts.userTotals(userId)).toEqual({ correct: 8, total: 8, perfectCount: 2, legendaryCount: 1 });
+    await repos.quizAttempts.record({ userId, gameSessionId: s, kind: 'wave', wave: 1, difficulty: 'easy', correct: 2, total: 2 });
+    await repos.quizAttempts.record({ userId, gameSessionId: s, kind: 'special', wave: 2, difficulty: 'hard', correct: 1, total: 1 });
+    await repos.quizAttempts.record({ userId, gameSessionId: s, kind: 'bonus', wave: 5, difficulty: 'hard', correct: 2, total: 2 });
+    await expect(repos.quizAttempts.record({ userId, gameSessionId: s, kind: 'upgradeBay', wave: 1, difficulty: 'easy', correct: 0, total: 2 })).rejects.toThrow();
+    expect(await repos.quizAttempts.totalsForSession(s)).toEqual({ correct: 5, total: 5 });
+    expect(await repos.quizAttempts.userTotals(userId)).toEqual({ correct: 5, total: 5, perfectCount: 2, legendaryCount: 1, specialSolved: 1 });
   });
 
   test('achievements unlock once (INSERT IGNORE)', async () => {

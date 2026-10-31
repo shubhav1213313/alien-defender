@@ -16,19 +16,27 @@ describe('LIVE: Marc Conrad Banana API', () => {
     console.log(`Banana API OK - solution ${puzzle.solution}, latency ${puzzle.latencyMs}ms, image ${Math.round(puzzle.image.length / 1024)}KB`);
   });
 
-  test('full arena over HTTP uses live puzzles (not the offline fallback)', async () => {
+  // The solution is never sent before answering, so the live test cannot
+  // know it in advance: it answers 0 and checks that the server marks the
+  // answer and reveals each live puzzle's solution afterwards.
+  test.each([
+    ['wave', 1, 2],
+    ['special', 3, 1],
+  ])('%s challenge over HTTP uses %#: live Banana puzzles end to end', async (kind, wave, count) => {
     const { app } = createTestApp(); // real Banana API, in-memory DB
-    const created = await request(app).post('/api/challenges').send({ wave: 1, difficulty: 'normal' }).expect(201);
+    const created = await request(app).post('/api/challenges').send({ kind, wave }).expect(201);
+    expect(created.body.data.totalQuestions).toBe(count);
     const id = created.body.data.arenaId;
-    const sources = [];
-    for (let i = 0; i < 4; i += 1) {
+    const seen = [];
+    for (let i = 0; i < count; i += 1) {
       const q = await request(app).get(`/api/challenges/${id}/question`).expect(200);
-      sources.push(`${q.body.data.source}(${q.body.data.latencyMs}ms)`);
-      await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: 0 }).expect(200);
+      expect(q.body.data.image).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
+      const a = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: 0 }).expect(200);
+      seen.push(`${q.body.data.source} ${q.body.data.latencyMs}ms -> solution ${a.body.data.correctAnswer}`);
     }
-    console.log(`Live arena question sources: ${sources.join(', ')}`);
-    expect(sources.every((s) => s.startsWith('banana'))).toBe(true);
-    await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+    console.log(`Live ${kind} challenge: ${seen.join(' | ')}`);
+    const claim = await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+    expect(claim.body.data.total).toBe(count);
   });
 });
 

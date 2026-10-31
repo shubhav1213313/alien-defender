@@ -5,7 +5,7 @@ const ACHIEVEMENTS = [
   ['first_blood', 'First Blood', '🎯'], ['alien_hunter', 'Alien Hunter', '👾'], ['wave_survivor', 'Wave Survivor', '🌊'],
   ['boss_slayer', 'Boss Slayer', '🛸'], ['first_victory', 'First Victory', '🏆'], ['combo_master', 'Combo Master', '🔥'],
   ['perfect_quiz', 'Perfect Quiz', '🧠'], ['knowledge_master', 'Knowledge Master', '📚'], ['hard_victory', 'Hardened Defender', '💀'],
-  ['legendary_defender', 'Legendary Defender', '👑'],
+  ['legendary_defender', 'Legendary Defender', '👑'], ['storm_caller', 'Storm Caller', '⚡'],
 ].map(([id, name, icon]) => ({ id, name, description: `${name} description`, icon }));
 
 function duplicate(key) {
@@ -104,8 +104,9 @@ function createMemoryRepositories({ now = () => Date.now() } = {}) {
         return {
           correct: mine.reduce((n, q) => n + q.correct, 0),
           total: mine.reduce((n, q) => n + q.total, 0),
-          perfectCount: mine.filter((q) => q.correct === q.total).length,
-          legendaryCount: mine.filter((q) => q.wave === 5 && q.difficulty === 'hard' && q.correct === q.total).length,
+          perfectCount: mine.filter((q) => q.kind !== 'special' && q.correct === q.total).length,
+          legendaryCount: mine.filter((q) => q.kind === 'bonus' && q.difficulty === 'hard' && q.correct === q.total).length,
+          specialSolved: mine.filter((q) => q.kind === 'special' && q.correct === q.total).length,
         };
       },
     },

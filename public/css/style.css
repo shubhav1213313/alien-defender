@@ -231,7 +231,77 @@ body {
 .data-table th { color: var(--muted); font-weight: 600; }
 .data-table tr.me td { color: var(--accent); font-weight: 600; }
 
-/* ---- Knowledge Challenge Arena ---------------------------------------- */
+/* ---- Special puzzle invitation (4 s, right side) ------------------------ */
+.special-offer {
+  position: absolute;
+  top: 120px;
+  right: 12px;
+  z-index: 3;
+  width: min(260px, 45%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 14px;
+  text-align: left;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--fg);
+  background: rgba(114, 9, 183, 0.88);
+  border: 2px solid #f72585;
+  border-radius: 8px;
+  box-shadow: 0 0 22px rgba(247, 37, 133, 0.6);
+  cursor: pointer;
+  animation: offer-pulse 0.8s ease-in-out infinite alternate;
+  overflow: hidden;
+}
+.special-offer[hidden] { display: none; }
+.special-offer strong { color: #ffd166; letter-spacing: 0.05em; }
+.special-offer:focus-visible { outline: 3px solid #ffd166; }
+.offer-countdown { align-self: flex-end; font-weight: 700; font-size: 1rem; color: #ffd166; }
+/* Shrinking bar along the bottom shows the remaining 4 seconds. */
+.special-offer::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  width: calc(var(--progress, 1) * 100%);
+  background: #ffd166;
+}
+@keyframes offer-pulse { from { transform: scale(1); } to { transform: scale(1.03); } }
+
+/* ---- Knowledge Challenge ------------------------------------------------ */
+.reward-preview {
+  margin: 0;
+  padding: 8px 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #04121a;
+  background: #ffd166;
+  border-radius: 6px;
+}
+.arena-instructions { margin: 0; padding-left: 20px; max-width: 600px; text-align: left; font-size: 0.85rem; }
+.arena-instructions li { margin: 2px 0; }
+.arena-ask { margin: 0; font-weight: 600; }
+.unlock { margin: 0; font-size: 1.3rem; font-weight: 700; color: #ffd166; text-shadow: 0 0 14px rgba(255, 209, 102, 0.6); }
+
+.digit-pad { display: grid; grid-template-columns: repeat(10, minmax(36px, 48px)); gap: 6px; justify-content: center; }
+@media (max-width: 560px) { .digit-pad { grid-template-columns: repeat(5, 48px); } }
+.digit {
+  height: 48px;
+  font: inherit;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 209, 102, 0.6);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.digit:hover:not(:disabled), .digit:focus-visible { background: #ffd166; color: #04121a; outline: none; }
+.digit:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- (older arena styles below are shared by the challenge screen) ------ */
 .overlay.arena { justify-content: flex-start; overflow-y: auto; background: rgba(5, 7, 15, 0.9); }
 
 .arena-panel {

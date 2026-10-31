@@ -1,10 +1,10 @@
-import { GameEngine } from '../../public/js/game/GameEngine.js';
+import { GameEngine, SPECIAL_OFFER, VOID_STORM } from '../../public/js/game/GameEngine.js';
 import { GameState } from '../../public/js/game/GameStateManager.js';
 import { AbilityManager } from '../../public/js/game/AbilityManager.js';
-import { ABILITIES, abilityStats } from '../../public/js/game/AbilityDefinitions.js';
+import { ABILITIES } from '../../public/js/game/AbilityDefinitions.js';
 import { EventBus } from '../../public/js/game/EventBus.js';
 import { Projectile } from '../../public/js/game/Projectile.js';
-const { calculateRewards, WAVE_ABILITIES } = require('../../src/services/arenaRules');
+const { calculateRewards, WAVE_ABILITIES, SPECIAL_ABILITY } = require('../../src/services/arenaRules');
 
 function fakeInput() {
   const held = new Set();
@@ -18,237 +18,314 @@ function fakeInput() {
   };
 }
 
-// An engine sitting in the arena that follows wave `wave`.
-function engineInArena(wave = 1) {
+const step = (engine, seconds) => { for (let t = 0; t < seconds; t += 1 / 60) engine.update(1 / 60); };
+
+// An engine in combat during wave `wave` (banners played through).
+function engineInWave(wave = 1, rng = () => 0.99) {
   const input = fakeInput();
-  const engine = new GameEngine({ input });
+  const engine = new GameEngine({ input, rng });
   engine.startGame('normal');
-  // Play through the opening banners so `wave` is genuinely the current wave.
   while (engine.waves.waveNumber < wave) {
     engine.update(engine.transitionTimer + 0.01);
     if (engine.waves.waveNumber < wave) engine.beginWaveTransition();
   }
-  engine.openArena(wave);
   return { engine, input };
 }
 
-const reward = (correct, difficulty = 'normal', wave = 1) => calculateRewards({ wave, difficulty, correct });
+function engineInQuiz(wave = 1) {
+  const ctx = engineInWave(wave);
+  ctx.engine.openArena(wave);
+  return ctx;
+}
 
-describe('Knowledge Arena flow in the engine', () => {
-  test('combat is frozen while the arena is open', () => {
-    const { engine, input } = engineInArena();
+const waveReward = (correct, wave = 1) => calculateRewards({ kind: 'wave', wave, correct });
+
+describe('Compulsory quiz after each wave (no Upgrade Bay)', () => {
+  test('clearing a wave stops combat and opens the 2-puzzle quiz automatically', () => {
+    const { engine } = engineInWave(1);
+    const opened = jest.fn();
+    engine.bus.on('arena:open', opened);
+    for (const e of engine.enemies) e.alive = false;
+    engine.waves.queue = [];
+    engine.update(0.016);
     expect(engine.state.state).toBe(GameState.QUIZ);
+    expect(opened).toHaveBeenCalledWith({ kind: 'wave', wave: 1, postBoss: false, nextWave: 2 });
+  });
+
+  test('combat is frozen during the quiz', () => {
+    const { engine, input } = engineInQuiz();
     input.held.add('right');
     const x = engine.player.x;
     engine.update(0.5);
     expect(engine.player.x).toBe(x);
   });
 
-  test('the arena cannot be bypassed with pause, Enter or ability keys', () => {
-    const { engine, input } = engineInArena();
+  test('the quiz cannot be bypassed with pause, Enter or ability keys', () => {
+    const { engine, input } = engineInQuiz();
     input.press('pause');
     input.press('confirm');
-    input.press('ability1');
+    for (const k of [1, 2, 3, 4, 5]) input.press(`ability${k}`);
     expect(engine.state.state).toBe(GameState.QUIZ);
     expect(engine.startGame()).toBe(false);
   });
 
-  test('stray bullets are cleared when the arena opens', () => {
-    const input = fakeInput();
-    const engine = new GameEngine({ input });
-    engine.startGame();
-    engine.projectiles.push(new Projectile({ x: 10, y: 10, owner: 'enemy' }));
-    engine.openArena(1);
-    expect(engine.projectiles).toHaveLength(0);
-  });
-
-  test.each([
-    [0, { energy: 0, health: 70, slots: 0 }],
-    [1, { energy: 10, health: 70, slots: 0 }],
-    [2, { energy: 20, health: 85, slots: 0 }],
-    [3, { energy: 20, health: 85, slots: 1 }],
-    [4, { energy: 35, health: 95, slots: 1 }],
-  ])('%i/4 rewards are applied to the game', (correct, expected) => {
-    const { engine } = engineInArena(2);
-    engine.player.health = 70;
-    engine.applyArenaRewards('a1', reward(correct, 'normal', 2));
-    expect(engine.abilities.energy).toBe(expected.energy);
-    expect(engine.player.health).toBe(expected.health);
-    expect(engine.abilities.slots.size).toBe(expected.slots);
-  });
-
-  test('the same arena rewards cannot be applied twice', () => {
-    const { engine } = engineInArena();
-    expect(engine.applyArenaRewards('a1', reward(2))).toBe(true);
-    expect(engine.applyArenaRewards('a1', reward(2))).toBe(false);
-    expect(engine.abilities.energy).toBe(20);
-  });
-
-  test('rewards cannot be applied outside an open arena', () => {
-    const engine = new GameEngine({ input: fakeInput() });
-    engine.startGame();
-    expect(engine.applyArenaRewards('a1', reward(4))).toBe(false);
-  });
-
-  test('finishing a 0/4 arena still continues to the next wave', () => {
-    const { engine } = engineInArena(1);
-    engine.applyArenaRewards('a1', reward(0));
-    expect(engine.finishArena()).toBe(true);
+  test.each([1, 2, 3, 4])('wave %i: 2/2 unlocks its ability, then the next wave starts', (wave) => {
+    const { engine } = engineInQuiz(wave);
+    engine.applyArenaRewards(`q${wave}`, waveReward(2, wave));
+    expect(engine.abilities.has(WAVE_ABILITIES[wave])).toBe(true);
+    engine.finishArena();
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
+    expect(engine.banner.title).toBe(`WAVE ${wave + 1}`);
+  });
+
+  test.each([0, 1])('%i/2 unlocks nothing but the next wave still starts', (correct) => {
+    const { engine } = engineInQuiz(1);
+    engine.applyArenaRewards('q', waveReward(correct));
+    expect(engine.abilities.slots.size).toBe(0);
+    expect(engine.abilities.energy).toBe(correct * 15);
+    expect(engine.finishArena()).toBe(true);
     expect(engine.banner.title).toBe('WAVE 2');
   });
 
-  test('finishing works even if rewards were never applied (e.g. server unreachable)', () => {
-    const { engine } = engineInArena(1);
-    expect(engine.finishArena()).toBe(true);
-    expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
-    expect(engine.finishArena()).toBe(false); // second call ignored
+  test('rewards apply once per challenge id', () => {
+    const { engine } = engineInQuiz();
+    expect(engine.applyArenaRewards('q', waveReward(2))).toBe(true);
+    expect(engine.applyArenaRewards('q', waveReward(2))).toBe(false);
+    expect(engine.abilities.energy).toBe(30);
   });
 
-  test('post-boss arena converts leftover energy into final score, then victory', () => {
-    const input = fakeInput();
-    const engine = new GameEngine({ input });
+  test('"Continue without ability" (API down) still moves on, exactly once', () => {
+    const { engine } = engineInQuiz();
+    expect(engine.finishArena()).toBe(true);
+    expect(engine.finishArena()).toBe(false);
+    expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
+  });
+
+  test('after the boss: Victory Bonus Challenge, then victory', () => {
+    const { engine } = engineInWave(1);
     const victory = jest.fn();
     engine.bus.on('game:victory', victory);
-    engine.startGame('hard');
     engine.openArena(5, true);
-    const before = engine.score;
-    engine.applyArenaRewards('final', calculateRewards({ wave: 5, difficulty: 'hard', correct: 4 }));
-    // Hard 4/4: 4 x 500 x 2 score bonus (x1.5 game difficulty) + 40 energy
-    expect(engine.score).toBe(before + Math.round(4000 * 1.5));
+    engine.applyArenaRewards('bonus', calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'hard', correct: 2 }));
     engine.finishArena();
     expect(engine.state.state).toBe(GameState.VICTORY);
-    expect(engine.stats.energyBonus).toBe(Math.round(40 * 10 * 1.5));
-    expect(victory).toHaveBeenCalledWith(expect.objectContaining({ achievements: ['legendary_defender'], arenaCorrect: 4 }));
+    expect(victory).toHaveBeenCalledWith(expect.objectContaining({ achievements: ['legendary_defender'] }));
+  });
+});
+
+describe('Optional special puzzle invitation', () => {
+  // rng: first call decides whether this wave gets an offer, second its time.
+  const OFFER_AT = SPECIAL_OFFER.earliest + 0.5 * (SPECIAL_OFFER.latest - SPECIAL_OFFER.earliest);
+  function waveWithOffer() {
+    const values = [0, 0.5]; // offer: yes, at earliest + 50% of the window
+    return engineInWave(1, () => (values.length ? values.shift() : 0.99));
+  }
+
+  test('appears during combat, lasts 4 s of combat time, then disappears harmlessly', () => {
+    const offers = [];
+    const { engine } = engineInWave(1, () => 0); // scheduled at the earliest time
+    // wave 1 was scheduled before we subscribed; schedule again with rng 0
+    engine.scheduleSpecialOffer();
+    engine.bus.on('special:offer', (o) => offers.push(o));
+    const expired = jest.fn();
+    engine.bus.on('special:expired', expired);
+    engine.player.maxHealth = engine.player.health = 1e9;
+    step(engine, SPECIAL_OFFER.earliest + 0.1);
+    expect(offers).toEqual([{ seconds: 4, abilityName: 'VOID STORM' }]);
+    expect(engine.specialOffer).not.toBeNull();
+    step(engine, 4.1);
+    expect(engine.specialOffer).toBeNull();
+    expect(expired).toHaveBeenCalled();
+    expect(engine.state.state).toBe(GameState.PLAYING); // combat simply continued
+  });
+
+  test('clicking within 4 s pauses combat and opens ONE special puzzle; finishing returns to the same wave', () => {
+    const { engine } = waveWithOffer();
+    engine.player.maxHealth = engine.player.health = 1e9;
+    const opened = jest.fn();
+    engine.bus.on('arena:open', opened);
+    step(engine, OFFER_AT + 0.5); // invitation visible (it lasts 4 s)
+    expect(engine.specialOffer).not.toBeNull();
+    expect(engine.acceptSpecialOffer()).toBe(true);
+    expect(engine.state.state).toBe(GameState.QUIZ);
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ kind: 'special', wave: 1 }));
+    engine.applyArenaRewards('s', calculateRewards({ kind: 'special', wave: 1, correct: 1 }));
+    expect(engine.abilities.has(SPECIAL_ABILITY)).toBe(true);
+    engine.finishArena();
+    expect(engine.state.state).toBe(GameState.PLAYING);
+    expect(engine.waves.waveNumber).toBe(1); // no wave skipped
+  });
+
+  test('a wrong special answer returns to combat without the ability', () => {
+    const { engine } = waveWithOffer();
+    step(engine, OFFER_AT + 0.5); // invitation visible (it lasts 4 s)
+    engine.acceptSpecialOffer();
+    engine.applyArenaRewards('s', calculateRewards({ kind: 'special', wave: 1, correct: 0 }));
+    engine.finishArena();
+    expect(engine.abilities.has('voidStorm')).toBe(false);
+    expect(engine.state.state).toBe(GameState.PLAYING);
+  });
+
+  test('clicking after it expired does nothing', () => {
+    const { engine } = engineInWave(1);
+    expect(engine.acceptSpecialOffer()).toBe(false);
+    expect(engine.state.state).toBe(GameState.PLAYING);
+  });
+
+  test('no spam: at most one per wave, never during the boss, never once VOID STORM is owned', () => {
+    const { engine } = engineInWave(1, () => 0);
+    engine.scheduleSpecialOffer();
+    const offers = jest.fn();
+    engine.bus.on('special:offer', offers);
+    engine.player.maxHealth = engine.player.health = 1e9;
+    step(engine, 60);
+    expect(offers).toHaveBeenCalledTimes(1);
+
+    engine.abilities.unlock('voidStorm');
+    engine.scheduleSpecialOffer();
+    step(engine, 20);
+    expect(offers).toHaveBeenCalledTimes(1);
+
+    const bossFight = engineInWave(1, () => 0).engine;
+    bossFight.spawnBoss();
+    bossFight.scheduleSpecialOffer();
+    const bossOffers = jest.fn();
+    bossFight.bus.on('special:offer', bossOffers);
+    bossFight.player.maxHealth = bossFight.player.health = 1e9;
+    step(bossFight, 20);
+    expect(bossOffers).not.toHaveBeenCalled();
+  });
+
+  test('an open invitation is withdrawn when the wave ends (cannot replace the compulsory quiz)', () => {
+    const { engine } = waveWithOffer();
+    step(engine, OFFER_AT + 0.5); // invitation visible (it lasts 4 s)
+    expect(engine.specialOffer).not.toBeNull();
+    engine.onWaveComplete(1, false);
+    expect(engine.specialOffer).toBeNull();
+    expect(engine.arena.kind).toBe('wave');
+    expect(engine.acceptSpecialOffer()).toBe(false);
   });
 });
 
 describe('AbilityManager', () => {
-  let bus;
   let abilities;
-  beforeEach(() => {
-    bus = new EventBus();
-    abilities = new AbilityManager(bus);
-  });
+  beforeEach(() => { abilities = new AbilityManager(new EventBus()); });
 
   test('energy is capped at 100', () => {
     abilities.addEnergy(80);
     expect(abilities.addEnergy(50)).toBe(20);
-    expect(abilities.energy).toBe(100);
   });
 
-  test('locked slots, cooldowns and missing energy block activation', () => {
-    const engine = { player: { addShield: jest.fn() } };
+  test('locked, cooldown and energy all block activation', () => {
+    const engine = { player: { effects: {} } };
     expect(abilities.activate(1, engine)).toEqual({ ok: false, reason: 'locked' });
-    abilities.unlock('miniShield', 'standard');
+    abilities.unlock('plasmaShield');
     expect(abilities.activate(1, engine)).toEqual({ ok: false, reason: 'energy' });
-    abilities.addEnergy(50);
+    abilities.addEnergy(100);
     expect(abilities.activate(1, engine)).toEqual({ ok: true });
-    expect(abilities.energy).toBe(30);
     expect(abilities.activate(1, engine)).toEqual({ ok: false, reason: 'cooldown' });
-    abilities.update(ABILITIES.miniShield.cooldown);
+    abilities.update(ABILITIES.plasmaShield.cooldown);
     expect(abilities.activate(1, engine)).toEqual({ ok: true });
-    expect(engine.player.addShield).toHaveBeenCalledTimes(2);
   });
 
-  test('slots upgrade (standard -> enhanced -> elite) but never downgrade', () => {
-    abilities.unlock('rapidFire', 'standard');
-    abilities.unlock('rapidFire', 'enhanced');
-    expect(abilities.slots.get(2)).toEqual({ id: 'rapidFire', tier: 'enhanced' });
-    abilities.unlock('phantomOverdrive', 'elite');
-    expect(abilities.unlock('rapidFire', 'standard')).toBe(false);
-    expect(abilities.slots.get(2)).toEqual({ id: 'phantomOverdrive', tier: 'elite' });
+  test('unlocking twice is ignored (no duplicate rewards)', () => {
+    expect(abilities.unlock('tripleBeam')).toBe(true);
+    expect(abilities.unlock('tripleBeam')).toBe(false);
   });
 
-  test('enhanced tier is cheaper and lasts longer', () => {
-    const std = abilityStats('rapidFire', 'standard');
-    const enh = abilityStats('rapidFire', 'enhanced');
-    expect(enh.cost).toBeLessThan(std.cost);
-    expect(enh.duration).toBeGreaterThan(std.duration);
-  });
-
-  test('every ability offered by the server exists in the game, in the right slot', () => {
-    for (const [wave, { standard, elite }] of Object.entries(WAVE_ABILITIES)) {
-      expect(ABILITIES[standard].slot).toBe(Number(wave));
-      expect(ABILITIES[elite].slot).toBe(Number(wave));
-      expect(ABILITIES[elite].cost).toBeGreaterThan(ABILITIES[standard].cost);
+  test('every ability offered by the server exists, in the right key slot, with cost and cooldown', () => {
+    for (const [wave, id] of Object.entries(WAVE_ABILITIES)) expect(ABILITIES[id].slot).toBe(Number(wave));
+    expect(ABILITIES[SPECIAL_ABILITY].slot).toBe(5);
+    for (const a of Object.values(ABILITIES)) {
+      expect(a.cost).toBeGreaterThan(0);
+      expect(a.cooldown).toBeGreaterThan(0);
     }
+    expect(ABILITIES.voidStorm.cost).toBeGreaterThan(ABILITIES.empShockwave.cost);
   });
 });
 
-describe('Ability effects in combat', () => {
-  function armed(abilityId, tier = 'standard') {
+describe('Ability effects (each one is different)', () => {
+  function armed(id) {
     const input = fakeInput();
     const engine = new GameEngine({ input });
     engine.startGame();
-    engine.abilities.unlock(abilityId, tier);
+    engine.abilities.unlock(id);
     engine.abilities.addEnergy(100);
-    return { engine, input, slot: ABILITIES[abilityId].slot };
+    return { engine, input, slot: ABILITIES[id].slot };
   }
 
-  test('abilities only work during combat, via keys 1-4', () => {
-    const { engine, input } = armed('miniShield');
-    engine.player.shield = 0;
+  test('keys 1-5 activate abilities only during combat', () => {
+    const { engine, input } = armed('plasmaShield');
     input.press('ability1');
-    expect(engine.player.shield).toBe(25);
+    expect(engine.player.hasPlasmaShield).toBe(true);
     engine.openArena(1);
     expect(engine.activateAbility(1)).toEqual({ ok: false, reason: 'inactive' });
   });
 
-  test('Ghost Mode makes the player immune to damage', () => {
-    const { engine, slot } = armed('ghostMode', 'elite');
+  test('Plasma Shield: no damage taken and enemy bullets touching it are destroyed', () => {
+    const { engine, slot } = armed('plasmaShield');
     engine.activateAbility(slot);
     engine.damagePlayer(500);
     expect(engine.player.health).toBe(100);
+    const bullet = new Projectile({ x: engine.player.x + 40, y: engine.player.y, vx: 0, vy: 0, owner: 'enemy' });
+    engine.projectiles.push(bullet);
+    engine.update(0.001);
+    expect(bullet.active).toBe(false);
   });
 
-  test('Rapid Fire shortens the fire cooldown', () => {
-    const { engine, slot } = armed('rapidFire');
+  test('Hyper Blaster: faster fire and double damage', () => {
+    const { engine, slot } = armed('hyperBlaster');
     engine.activateAbility(slot);
-    engine.player.fire();
+    const [shot] = engine.player.fire();
+    expect(shot.damage).toBe(2);
     expect(engine.player.cooldownTimer).toBeCloseTo(engine.player.fireCooldown * 0.4);
   });
 
-  test('Phantom Overdrive hides the player from aimed attacks', () => {
-    const { engine, slot } = armed('phantomOverdrive', 'elite');
-    expect(engine.target).toBe(engine.player);
-    engine.activateAbility(slot);
-    expect(engine.target).toBeNull();
-  });
-
-  test('Triple Laser fires three projectiles per shot', () => {
-    const { engine, slot } = armed('tripleLaser');
+  test('Triple Beam: three projectiles per shot', () => {
+    const { engine, slot } = armed('tripleBeam');
     engine.activateAbility(slot);
     expect(engine.player.fire()).toHaveLength(3);
   });
 
-  test('Time Freeze stops aliens and their bullets', () => {
-    const { engine, slot } = armed('timeFreezeLaser', 'elite');
-    const tank = engine.spawnEnemy('armored', 300, 100);
-    engine.projectiles.push(new Projectile({ x: 50, y: 50, vy: 100, owner: 'enemy' }));
-    engine.activateAbility(slot);
-    engine.update(0.5);
-    expect(tank.y).toBe(100);
-    expect(engine.projectiles.find((p) => p.owner === 'enemy').y).toBe(50);
-  });
-
-  test('EMP Blast clears alien bullets and damages every alien', () => {
-    const { engine, slot } = armed('empBlast');
+  test('EMP Shockwave: clears bullets, damages every alien and stuns them', () => {
+    const { engine, slot } = armed('empShockwave');
     const scout = engine.spawnEnemy('scout', 100, 100);
     const tank = engine.spawnEnemy('armored', 300, 100);
     engine.projectiles.push(new Projectile({ x: 50, y: 50, owner: 'enemy' }));
     engine.activateAbility(slot);
     expect(scout.alive).toBe(false);
-    expect(tank.health).toBe(tank.maxHealth - 3);
+    expect(tank.health).toBe(tank.maxHealth - 4);
     expect(engine.projectiles.some((p) => p.owner === 'enemy')).toBe(false);
+    const y = tank.y;
+    engine.update(1);
+    expect(tank.y).toBe(y); // stunned
     expect(engine.stats.shotsHit).toBe(0); // ability hits do not inflate accuracy
   });
 
-  test('Ultimate Nova hits harder than EMP Blast', () => {
-    const { engine, slot } = armed('ultimateNova', 'elite');
-    const tank = engine.spawnEnemy('armored', 300, 100);
+  test('VOID STORM: lightning strikes several aliens over 6 s', () => {
+    const { engine, slot } = armed('voidStorm');
+    const tanks = [100, 300, 500, 700].map((x) => engine.spawnEnemy('armored', x, 100));
+    engine.stunTimer = 100; // keep them still for the test
     engine.activateAbility(slot);
-    expect(tank.alive).toBe(false);
-    expect(engine.player.isGhost).toBe(true);
+    engine.update(0.01);
+    expect(tanks.filter((t) => t.health < t.maxHealth)).toHaveLength(VOID_STORM.targetsPerStrike);
+    for (let t = 0; t < 7; t += 0.05) engine.update(0.05);
+    expect(engine.voidStorm).toBeNull();
+    expect(tanks.every((t) => !t.alive)).toBe(true);
+  });
+
+  test('VOID STORM cannot instantly defeat the three-phase boss', () => {
+    const { engine, slot } = armed('voidStorm');
+    engine.spawnBoss();
+    engine.boss.entering = false;
+    engine.boss.y = engine.boss.entryY;
+    engine.stunTimer = 100;
+    const before = engine.boss.health;
+    engine.activateAbility(slot);
+    for (let t = 0; t < 7; t += 0.05) engine.update(0.05);
+    const dealt = before - engine.boss.health;
+    expect(dealt).toBeGreaterThan(0);
+    expect(dealt).toBeLessThan(before * 0.2); // under 20% of its health
+    expect(engine.boss.alive).toBe(true);
   });
 });

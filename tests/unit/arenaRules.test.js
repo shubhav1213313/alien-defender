@@ -1,101 +1,79 @@
-const { calculateRewards, describeArena, WAVE_ABILITIES, DIFFICULTY_RULES } = require('../../src/services/arenaRules');
-const { generateOfflinePuzzle } = require('../../src/services/offlinePuzzleService');
+const { calculateRewards, describeChallenge, validWave, WAVE_ABILITIES, KINDS } = require('../../src/services/arenaRules');
 
-describe('Arena reward tiers (waves 1-4)', () => {
-  const r = (correct, difficulty = 'normal', wave = 2) => calculateRewards({ wave, difficulty, correct });
+describe('Compulsory post-wave quiz (kind "wave")', () => {
+  const r = (correct, wave = 1) => calculateRewards({ kind: 'wave', wave, correct });
 
-  test('0/4: nothing, but no penalty either', () => {
-    expect(r(0)).toMatchObject({ energy: 0, repair: 0, ability: null, scoreBonus: 0 });
-  });
-
-  test('1/4: +10 Knowledge Energy', () => {
-    expect(r(1)).toMatchObject({ energy: 10, repair: 0, ability: null });
-  });
-
-  test('2/4: +20 energy and minor hull repair', () => {
-    expect(r(2)).toMatchObject({ energy: 20, repair: 15, ability: null });
-  });
-
-  test('3/4: unlocks the standard ability for that wave', () => {
-    for (const wave of [1, 2, 3, 4]) {
-      for (const difficulty of ['easy', 'normal', 'hard']) {
-        expect(r(3, difficulty, wave).ability).toEqual({ id: WAVE_ABILITIES[wave].standard, tier: 'standard', slot: wave });
-      }
-    }
-  });
-
-  test('4/4: reward strength depends on the chosen difficulty', () => {
-    expect(r(4, 'easy', 1).ability).toEqual({ id: 'miniShield', tier: 'standard', slot: 1 });
-    expect(r(4, 'normal', 1).ability).toEqual({ id: 'miniShield', tier: 'enhanced', slot: 1 });
-    expect(r(4, 'hard', 1).ability).toEqual({ id: 'ghostMode', tier: 'elite', slot: 1 });
-    expect(r(4, 'easy').energy).toBeLessThan(r(4, 'normal').energy);
-    expect(r(4, 'normal').energy).toBeLessThan(r(4, 'hard').energy);
-  });
-
-  test('Easy and Normal perfect runs are still worth more than 3/4', () => {
-    expect(r(4, 'easy').energy).toBeGreaterThan(r(3, 'easy').energy);
-    expect(r(4, 'easy').repair).toBeGreaterThan(r(3, 'easy').repair);
+  test('has exactly two puzzles', () => {
+    expect(KINDS.wave.questions).toBe(2);
   });
 
   test.each([
-    [1, 'miniShield', 'ghostMode'],
-    [2, 'rapidFire', 'phantomOverdrive'],
-    [3, 'tripleLaser', 'timeFreezeLaser'],
-    [4, 'empBlast', 'ultimateNova'],
-  ])('wave %i offers %s / elite %s', (wave, standard, elite) => {
-    expect(WAVE_ABILITIES[wave]).toEqual({ standard, elite });
-    expect(r(4, 'hard', wave).ability.id).toBe(elite);
+    [1, 'plasmaShield', 'Plasma Shield'],
+    [2, 'hyperBlaster', 'Hyper Blaster'],
+    [3, 'tripleBeam', 'Triple Beam'],
+    [4, 'empShockwave', 'EMP Shockwave'],
+  ])('wave %i: 2/2 unlocks %s', (wave, id, name) => {
+    expect(WAVE_ABILITIES[wave]).toBe(id);
+    expect(r(2, wave).ability).toEqual({ id, name, slot: wave });
   });
 
-  test('rejects impossible inputs', () => {
-    expect(() => r(5)).toThrow('Invalid correct count');
-    expect(() => r(2, 'nightmare')).toThrow('Unknown arena difficulty');
-  });
-});
-
-describe('Post-boss bonus challenge (wave 5)', () => {
-  test('gives score bonus and energy, never an ability', () => {
-    const reward = calculateRewards({ wave: 5, difficulty: 'normal', correct: 3 });
-    expect(reward.postBoss).toBe(true);
-    expect(reward.ability).toBeNull();
-    expect(reward.scoreBonus).toBe(3 * 500 * 1.5);
+  test.each([0, 1])('%i/2 unlocks nothing', (correct) => {
+    for (const wave of [1, 2, 3, 4]) expect(r(correct, wave).ability).toBeNull();
   });
 
-  test('Legendary Defender only for a perfect Hard run', () => {
-    expect(calculateRewards({ wave: 5, difficulty: 'hard', correct: 4 }).achievements).toEqual(['legendary_defender']);
-    expect(calculateRewards({ wave: 5, difficulty: 'hard', correct: 3 }).achievements).toEqual([]);
-    expect(calculateRewards({ wave: 5, difficulty: 'normal', correct: 4 }).achievements).toEqual([]);
+  test('every correct answer gives Knowledge Energy (15 each)', () => {
+    expect([0, 1, 2].map((c) => r(c).energy)).toEqual([0, 15, 30]);
+  });
+
+  test('the preview names the ability', () => {
+    expect(describeChallenge('wave', 1).preview).toBe('SOLVE BOTH PUZZLES TO UNLOCK PLASMA SHIELD');
+    expect(describeChallenge('wave', 4).preview).toBe('SOLVE BOTH PUZZLES TO UNLOCK EMP SHOCKWAVE');
   });
 });
 
-describe('Difficulty rules are game-side and transparent', () => {
-  test('harder modes give less time and no hints', () => {
-    const { easy, normal, hard } = DIFFICULTY_RULES;
-    expect(easy.timeLimitSeconds).toBeGreaterThan(normal.timeLimitSeconds);
-    expect(normal.timeLimitSeconds).toBeGreaterThan(hard.timeLimitSeconds);
-    expect([easy.hintsAllowed, normal.hintsAllowed, hard.hintsAllowed]).toEqual([true, false, false]);
+describe('Optional special puzzle (kind "special")', () => {
+  test('one puzzle, 20 seconds, no hints', () => {
+    expect(KINDS.special).toMatchObject({ questions: 1, timeLimitSeconds: 20, hintsAllowed: false });
   });
 
-  test('describeArena tells the player the API has no difficulty setting and lists every tier', () => {
-    const info = describeArena(3);
+  test('correct unlocks VOID STORM; wrong unlocks nothing', () => {
+    expect(calculateRewards({ kind: 'special', wave: 3, correct: 1 }).ability).toEqual({ id: 'voidStorm', name: 'VOID STORM', slot: 5 });
+    expect(calculateRewards({ kind: 'special', wave: 3, correct: 0 }).ability).toBeNull();
+  });
+
+  test('the rules say honestly why it is "hard"', () => {
+    const info = describeChallenge('special', 2);
+    expect(info.preview).toBe('SOLVE THIS PUZZLE TO UNLOCK VOID STORM');
     expect(info.note).toMatch(/no difficulty setting/);
-    expect(info.difficulties).toHaveLength(3);
-    for (const d of info.difficulties) expect(d.rewardTable).toHaveLength(5);
-    expect(describeArena(5).postBoss).toBe(true);
+    expect(info.note).toMatch(/20-second limit and no hint/);
   });
 });
 
-describe('Offline fallback puzzle', () => {
-  test('is a labelled SVG whose stated solution is correct', () => {
-    for (let i = 0; i < 25; i += 1) {
-      const puzzle = generateOfflinePuzzle();
-      const svg = Buffer.from(puzzle.image.split(',')[1], 'base64').toString('utf8');
-      expect(svg).toContain('OFFLINE PUZZLE');
-      const cherryTotal = Number(svg.match(/🍒 \+ 🍒 = (\d+)/)[1]);
-      const mixedTotal = Number(svg.match(/🍌 \+ 🍒 = (\d+)/)[1]);
-      expect(puzzle.solution).toBe(mixedTotal - cherryTotal / 2);
-      expect(puzzle.solution).toBeGreaterThanOrEqual(0);
-      expect(puzzle.solution).toBeLessThanOrEqual(9);
-    }
+describe('Victory Bonus Challenge (kind "bonus")', () => {
+  test('points scale with game difficulty; never an ability', () => {
+    expect(calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'easy', correct: 2 })).toMatchObject({ scoreBonus: 2000, ability: null });
+    expect(calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'hard', correct: 1 }).scoreBonus).toBe(2000);
+  });
+
+  test('Legendary Defender only for 2/2 on a Hard game', () => {
+    expect(calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'hard', correct: 2 }).achievements).toEqual(['legendary_defender']);
+    expect(calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'normal', correct: 2 }).achievements).toEqual([]);
+    expect(calculateRewards({ kind: 'bonus', wave: 5, difficulty: 'hard', correct: 1 }).achievements).toEqual([]);
+  });
+});
+
+describe('Validation', () => {
+  test.each([
+    ['wave', 1, true], ['wave', 4, true], ['wave', 5, false], ['wave', 0, false],
+    ['bonus', 5, true], ['bonus', 4, false],
+    ['special', 1, true], ['special', 5, true], ['special', 6, false],
+  ])('%s challenge after wave %i valid: %p', (kind, wave, ok) => {
+    expect(validWave(kind, wave)).toBe(ok);
+  });
+
+  test('rejects impossible scores and unknown kinds', () => {
+    expect(() => calculateRewards({ kind: 'wave', wave: 1, correct: 3 })).toThrow('Invalid correct count');
+    expect(() => calculateRewards({ kind: 'special', wave: 1, correct: 2 })).toThrow('Invalid correct count');
+    expect(() => calculateRewards({ kind: 'upgradeBay', wave: 1, correct: 0 })).toThrow('Unknown challenge kind');
   });
 });

@@ -67,10 +67,10 @@ class ScoreService {
     };
   }
 
-  // Records a Knowledge Arena result for a logged-in player. Called by the
-  // server when rewards are claimed.
-  async recordArena({ userId, gameSessionId, wave, difficulty, correct, total }) {
-    return this.quizAttempts.record({ userId, gameSessionId, wave, difficulty, correct, total });
+  // Records a Knowledge Challenge result for a logged-in player. Called by
+  // the server when rewards are claimed.
+  async recordArena({ userId, gameSessionId, kind, wave, difficulty, correct, total }) {
+    return this.quizAttempts.record({ userId, gameSessionId, kind, wave, difficulty, correct, total });
   }
 
   async profile(userId) {
