@@ -41,6 +41,7 @@ export class Enemy {
     this.points = points;
     this.contactDamage = contactDamage;
     this.escapeDamage = escapeDamage;
+    this.fireRate = m.fireRate;
     this.fireInterval = fireInterval / m.fireRate;
     this.projectileSpeed = projectileSpeed * m.projectileSpeed;
     this.projectileDamage = projectileDamage;
@@ -103,6 +104,26 @@ export class Enemy {
       radius: 5,
       damage: this.projectileDamage,
       owner: 'enemy',
+    }));
+  }
+
+  // Who aliens aim at. The engine exposes `target` (null while the player is
+  // invisible); simple test worlds just provide `player`.
+  targetOf(world) {
+    return 'target' in world ? world.target : world.player;
+  }
+
+  // Fire one bullet at an angle in radians (0 = right, PI/2 = straight down).
+  fireDirection(world, angle, speed = this.projectileSpeed, color) {
+    world.spawnProjectile(new Projectile({
+      x: this.x,
+      y: this.y + this.height / 3,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      radius: 6,
+      damage: this.projectileDamage,
+      owner: 'enemy',
+      color,
     }));
   }
 

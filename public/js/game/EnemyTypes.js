@@ -124,11 +124,14 @@ export class SniperAlien extends Enemy {
       }
     }
     // Lock on to where the player is while charging.
-    if (this.isCharging && world.player) this.target = { x: world.player.x, y: world.player.y };
+    const target = this.targetOf(world);
+    this.target = this.isCharging && target ? { x: target.x, y: target.y } : null;
   }
 
+  // Holds fire if the player cannot be targeted (e.g. invisible).
   attack(world) {
-    if (world.player) this.fireAt(world, world.player);
+    const target = this.targetOf(world);
+    if (target) this.fireAt(world, target);
     this.target = null;
   }
 
@@ -175,10 +178,12 @@ export class KamikazeAlien extends Enemy {
   }
 
   move(dt, world) {
-    if (this.isDiving && world.player) {
+    const target = this.targetOf(world);
+    // Without a target it keeps flying in its current direction.
+    if (this.isDiving && target) {
       this.currentSpeed = Math.min(this.maxSpeed, this.currentSpeed + this.acceleration * dt);
-      const dx = world.player.x - this.x;
-      const dy = world.player.y - this.y;
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
       const length = Math.hypot(dx, dy) || 1;
       // Steer towards the player but with limited turning, so it can be dodged.
       const steer = Math.min(1, 3 * dt);

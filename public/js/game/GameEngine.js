@@ -8,6 +8,7 @@ import { EnemyFactory } from './EnemyFactory.js';
 import { WaveManager } from './WaveManager.js';
 import { ScoreManager } from './ScoreManager.js';
 import { getDifficulty } from './DifficultySettings.js';
+import { Boss } from './Boss.js';
 
 const WAVE_BANNER_SECONDS = 2.5;
 const WAVE_CLEAR_BONUS = 500; // x wave number
@@ -61,7 +62,10 @@ export class GameEngine {
     this.banner = null;
     this.transitionTimer = 0;
     this.resumeState = GameState.PLAYING;
-    this.stats = { enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0, wavesCleared: 0 };
+    this.boss = null;
+    this.pendingBoss = false;
+    this.alert = null; // short centre-screen message, e.g. "PHASE 2"
+    this.stats = { enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0, wavesCleared: 0, bossDefeated: false };
   }
 
   // Event-driven reactions. Other systems (HUD, audio, achievements) can
@@ -71,10 +75,18 @@ export class GameEngine {
     bus.on('collision:playerHit', ({ damage }) => this.damagePlayer(damage));
     bus.on('collision:enemyHit', ({ projectile, enemy }) => this.hitEnemy(enemy, projectile.damage));
     // Ramming the player destroys the alien (no points) and hurts the player.
+    // The boss survives a collision; ordinary aliens do not.
     bus.on('collision:playerRammed', ({ enemy, damage }) => {
-      enemy.alive = false;
-      this.particles.burst(enemy.x, enemy.y, { color: enemy.color, count: 24 });
+      if (!enemy.isBoss) {
+        enemy.alive = false;
+        this.particles.burst(enemy.x, enemy.y, { color: enemy.color, count: 24 });
+      }
       this.damagePlayer(damage);
+    });
+    bus.on('boss:phase', ({ phase, boss }) => {
+      this.alert = { text: `PHASE ${phase}`, timer: 1.5 };
+      this.damageFlash = Math.max(this.damageFlash, 0.2);
+      this.particles.burst(boss.x, boss.y, { color: '#f72585', count: 80, speed: 380, life: 1 });
     });
     bus.on('enemy:escaped', ({ enemy }) => this.damageEarth(enemy.escapeDamage));
     bus.on('wave:complete', ({ wave, isFinal }) => this.onWaveComplete(wave, isFinal));
@@ -102,6 +114,31 @@ export class GameEngine {
     this.particles.burst(enemy.x, enemy.y, { color: enemy.color, count: 26, speed: 260 });
     // ScoreManager listens for this event and awards (combo-scaled) points.
     this.bus.emit('enemy:destroyed', { enemy, type: enemy.type, points: enemy.points });
+    if (enemy.isBoss) this.onBossDefeated(enemy);
+  }
+
+  // The engine is the "world" enemies see; `target` is who they aim at.
+  get target() {
+    return this.player;
+  }
+
+  spawnBoss() {
+    this.boss = new Boss({ x: WORLD_WIDTH / 2, y: -80, modifiers: this.difficulty.enemyModifiers });
+    this.enemies.push(this.boss);
+    this.bus.emit('boss:spawn', { maxHealth: this.boss.maxHealth });
+  }
+
+  onBossDefeated(boss) {
+    this.stats.bossDefeated = true;
+    // Spectacular chain of explosions; remaining escorts and bullets vanish.
+    for (let i = 0; i < 6; i += 1) {
+      this.particles.burst(boss.x + (Math.random() - 0.5) * boss.width, boss.y + (Math.random() - 0.5) * boss.height,
+        { color: ['#f72585', '#ffd166', '#7bdff2'][i % 3], count: 50, speed: 420, life: 1.4 });
+    }
+    for (const e of this.enemies) if (e !== boss) e.alive = false;
+    this.projectiles = this.projectiles.filter((p) => p.owner === 'player');
+    this.bus.emit('boss:defeated', { score: this.score });
+    this.onFinalBattleWon();
   }
 
   damagePlayer(baseAmount) {
@@ -163,9 +200,16 @@ export class GameEngine {
     }
   }
 
-  // Final boss arrives here in the boss milestone; for now, clearing every
-  // wave wins the game.
+  // After the fifth wave the Mothership arrives instead of a sixth wave.
   onAllWavesCleared() {
+    this.banner = { title: 'WARNING', subtitle: 'Mothership approaching' };
+    this.transitionTimer = WAVE_BANNER_SECONDS;
+    this.pendingBoss = true;
+    this.state.transition(GameState.WAVE_TRANSITION);
+  }
+
+  // Called once the boss is destroyed.
+  onFinalBattleWon() {
     this.endGame('victory');
   }
 
@@ -230,6 +274,10 @@ export class GameEngine {
     this.particles.update(dt);
     this.damageFlash = Math.max(0, this.damageFlash - dt);
     if (!this.state.isSimulating) return;
+    if (this.alert) {
+      this.alert.timer -= dt;
+      if (this.alert.timer <= 0) this.alert = null;
+    }
 
     this.elapsed += dt;
     this.scoreManager.update(dt);
@@ -259,7 +307,12 @@ export class GameEngine {
       if (this.transitionTimer <= 0) {
         this.banner = null;
         this.state.transition(GameState.PLAYING);
-        this.waves.startNextWave();
+        if (this.pendingBoss) {
+          this.pendingBoss = false;
+          this.spawnBoss();
+        } else {
+          this.waves.startNextWave();
+        }
       }
     } else if (this.state.is(GameState.PLAYING)) {
       this.waves.update(dt, this.enemies.length);
@@ -293,7 +346,9 @@ export class GameEngine {
       if (!this.player.isDead) this.player.draw(ctx);
       this.particles.draw(ctx);
       this.drawHud(ctx);
+      if (this.boss && this.boss.alive) this.drawBossBar(ctx);
       if (this.banner) this.drawBanner(ctx);
+      if (this.alert) this.drawAlert(ctx);
     }
 
     if (this.damageFlash > 0) {
@@ -354,6 +409,38 @@ export class GameEngine {
       ctx.fillRect(WORLD_WIDTH / 2 - 100, 30, 200 * this.waves.progress, 4);
     }
     ctx.textAlign = 'left';
+  }
+
+  drawBossBar(ctx) {
+    const { boss } = this;
+    const width = 420;
+    const x = (WORLD_WIDTH - width) / 2;
+    const y = 50;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x, y, width, 12);
+    ctx.fillStyle = ['#7209b7', '#b5179e', '#f72585'][boss.phase - 1];
+    ctx.fillRect(x, y, width * boss.healthRatio, 12);
+    // Phase markers at 67% and 33%.
+    ctx.fillStyle = '#e6f1ff';
+    ctx.fillRect(x + width / 3, y - 2, 2, 16);
+    ctx.fillRect(x + (width * 2) / 3, y - 2, 2, 16);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 13px Segoe UI, sans-serif';
+    ctx.fillText(`MOTHERSHIP · PHASE ${boss.phase}/3`, WORLD_WIDTH / 2, y - 6);
+    ctx.restore();
+  }
+
+  drawAlert(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, this.alert.timer / 0.4);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f72585';
+    ctx.shadowColor = '#f72585';
+    ctx.shadowBlur = 20;
+    ctx.font = 'bold 44px Segoe UI, sans-serif';
+    ctx.fillText(this.alert.text, WORLD_WIDTH / 2, WORLD_HEIGHT / 2);
+    ctx.restore();
   }
 
   drawBanner(ctx) {
