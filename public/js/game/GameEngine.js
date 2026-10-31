@@ -9,9 +9,12 @@ import { WaveManager } from './WaveManager.js';
 import { ScoreManager } from './ScoreManager.js';
 import { getDifficulty } from './DifficultySettings.js';
 import { Boss } from './Boss.js';
+import { AbilityManager } from './AbilityManager.js';
 
 const WAVE_BANNER_SECONDS = 2.5;
 const WAVE_CLEAR_BONUS = 500; // x wave number
+const FINAL_ARENA_WAVE = 5; // the arena after the boss is a victory bonus
+const ENERGY_TO_SCORE = 10; // leftover energy converts to points at the end
 
 // Owns the requestAnimationFrame loop and wires the game systems together.
 //   input -> update(dt) -> collision events -> score/wave/state changes -> render()
@@ -28,6 +31,7 @@ export class GameEngine {
     this.particles = new ParticleSystem();
     this.scoreManager = new ScoreManager(bus);
     this.waves = new WaveManager({ bus, spawn: (type, x, y) => this.spawnEnemy(type, x, y) });
+    this.abilities = new AbilityManager(bus);
     this.stars = Array.from({ length: 90 }, () => ({
       x: Math.random() * WORLD_WIDTH,
       y: Math.random() * WORLD_HEIGHT,
@@ -40,7 +44,10 @@ export class GameEngine {
 
     this.resetWorld(getDifficulty('normal'));
     this.registerEventHandlers();
-    if (input && input.on) input.on('pause', () => this.togglePause());
+    if (input && input.on) {
+      input.on('pause', () => this.togglePause());
+      for (const slot of [1, 2, 3, 4]) input.on(`ability${slot}`, () => this.activateAbility(slot));
+    }
   }
 
   get score() {
@@ -65,7 +72,15 @@ export class GameEngine {
     this.boss = null;
     this.pendingBoss = false;
     this.alert = null; // short centre-screen message, e.g. "PHASE 2"
-    this.stats = { enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0, wavesCleared: 0, bossDefeated: false };
+    this.abilities.reset();
+    this.timeFreeze = 0;
+    this.shockwaves = [];
+    this.arena = null; // { wave, postBoss } while the Knowledge Arena is open
+    this.appliedArenaIds = new Set(); // guards against applying rewards twice
+    this.stats = {
+      enemiesDestroyed: 0, shotsFired: 0, shotsHit: 0, wavesCleared: 0, bossDefeated: false,
+      arenaCorrect: 0, arenaQuestions: 0, abilitiesUsed: 0, achievements: [], energyBonus: 0,
+    };
   }
 
   // Event-driven reactions. Other systems (HUD, audio, achievements) can
@@ -105,8 +120,9 @@ export class GameEngine {
     return enemy;
   }
 
-  hitEnemy(enemy, damage) {
-    this.stats.shotsHit += 1;
+  // fromShot is false for ability damage so accuracy stats stay honest.
+  hitEnemy(enemy, damage, fromShot = true) {
+    if (fromShot) this.stats.shotsHit += 1;
     const destroyed = enemy.takeHit(damage);
     this.particles.burst(enemy.x, enemy.y, { color: '#ffffff', count: 4, speed: 120, life: 0.25, size: 2 });
     if (!destroyed) return;
@@ -118,8 +134,27 @@ export class GameEngine {
   }
 
   // The engine is the "world" enemies see; `target` is who they aim at.
+  // While invisible (Phantom Overdrive) aliens have nothing to aim at.
   get target() {
-    return this.player;
+    return this.player.isInvisible ? null : this.player;
+  }
+
+  // ---- Special abilities ----------------------------------------------------
+
+  activateAbility(slot) {
+    if (!this.isActive) return { ok: false, reason: 'inactive' };
+    const result = this.abilities.activate(slot, this);
+    if (result.ok) this.stats.abilitiesUsed += 1;
+    return result;
+  }
+
+  // EMP Blast / Ultimate Nova: wipes alien bullets and damages every alien.
+  shockwave({ damage, bossDamage, color }) {
+    this.projectiles = this.projectiles.filter((p) => p.owner === 'player');
+    this.shockwaves.push({ x: this.player.x, y: this.player.y, radius: 0, color });
+    for (const enemy of [...this.enemies]) {
+      if (enemy.alive) this.hitEnemy(enemy, enemy.isBoss ? bossDamage : damage, false);
+    }
   }
 
   spawnBoss() {
@@ -190,14 +225,64 @@ export class GameEngine {
     this.state.transition(GameState.WAVE_TRANSITION);
   }
 
+  // Waves 1-4 are followed by the compulsory Knowledge Challenge Arena.
   onWaveComplete(wave, isFinal) {
     this.stats.wavesCleared += 1;
     this.scoreManager.addBonus(WAVE_CLEAR_BONUS * wave, 'wave');
     if (isFinal) {
       this.onAllWavesCleared();
     } else {
+      this.openArena(wave);
+    }
+  }
+
+  // ---- Knowledge Challenge Arena -------------------------------------------
+  // The engine only pauses the game and announces 'arena:open'. The arena UI
+  // runs the four puzzles via the server, then calls applyArenaRewards() and
+  // finishArena(). Combat cannot resume until finishArena() is called.
+
+  openArena(wave, postBoss = false) {
+    this.arena = { wave, postBoss };
+    this.projectiles = []; // no stray bullets waiting when combat resumes
+    if (this.input) this.input.releaseAll();
+    this.state.transition(GameState.QUIZ);
+    this.bus.emit('arena:open', { wave, postBoss, nextWave: postBoss ? null : wave + 1 });
+  }
+
+  // Applies server-calculated rewards once per arena id.
+  applyArenaRewards(arenaId, reward) {
+    if (!this.state.is(GameState.QUIZ) || !this.arena || this.appliedArenaIds.has(arenaId)) return false;
+    this.appliedArenaIds.add(arenaId);
+    this.stats.arenaCorrect += reward.correct;
+    this.stats.arenaQuestions += reward.total;
+    if (reward.energy) this.abilities.addEnergy(reward.energy);
+    if (reward.repair) this.player.heal(reward.repair);
+    if (reward.ability) this.abilities.unlock(reward.ability.id, reward.ability.tier);
+    if (reward.scoreBonus) this.scoreManager.addBonus(reward.scoreBonus, 'arena');
+    for (const id of reward.achievements || []) {
+      if (!this.stats.achievements.includes(id)) this.stats.achievements.push(id);
+    }
+    this.bus.emit('arena:rewards', { arenaId, reward });
+    return true;
+  }
+
+  // Leaves the arena: next wave banner, or - after the boss - final victory.
+  // Works whether or not rewards were applied, so a failed or broken
+  // challenge can never trap the player.
+  finishArena() {
+    if (!this.state.is(GameState.QUIZ) || !this.arena) return false;
+    const { postBoss } = this.arena;
+    this.arena = null;
+    this.bus.emit('arena:closed', { postBoss });
+    if (postBoss) {
+      // Final performance score: leftover Knowledge Energy becomes points.
+      const energy = Math.floor(this.abilities.energy);
+      if (energy > 0) this.stats.energyBonus = this.scoreManager.addBonus(energy * ENERGY_TO_SCORE, 'energy');
+      this.endGame('victory');
+    } else {
       this.beginWaveTransition();
     }
+    return true;
   }
 
   // After the fifth wave the Mothership arrives instead of a sixth wave.
@@ -208,9 +293,9 @@ export class GameEngine {
     this.state.transition(GameState.WAVE_TRANSITION);
   }
 
-  // Called once the boss is destroyed.
+  // Called once the boss is destroyed: the post-boss bonus challenge.
   onFinalBattleWon() {
-    this.endGame('victory');
+    this.openArena(FINAL_ARENA_WAVE, true);
   }
 
   endGame(reason) {
@@ -233,6 +318,7 @@ export class GameEngine {
       maxCombo: this.scoreManager.maxCombo,
       survivedSeconds: this.elapsed,
       ...this.stats,
+      achievements: [...this.stats.achievements],
     };
   }
 
@@ -281,6 +367,10 @@ export class GameEngine {
 
     this.elapsed += dt;
     this.scoreManager.update(dt);
+    this.abilities.update(dt);
+    this.timeFreeze = Math.max(0, this.timeFreeze - dt);
+    for (const wave of this.shockwaves) wave.radius += 1400 * dt;
+    this.shockwaves = this.shockwaves.filter((w) => w.radius < WORLD_WIDTH * 1.2);
     this.player.update(dt, this.input);
     if (this.input.isDown('fire')) {
       const shots = this.player.fire();
@@ -291,8 +381,10 @@ export class GameEngine {
       }
     }
 
-    for (const enemy of this.enemies) enemy.update(dt, this);
-    for (const p of this.projectiles) p.update(dt);
+    // Time Freeze stops every alien and alien bullet; the player keeps moving.
+    const frozen = this.timeFreeze > 0;
+    if (!frozen) for (const enemy of this.enemies) enemy.update(dt, this);
+    for (const p of this.projectiles) if (!frozen || p.owner === 'player') p.update(dt);
 
     this.collisions.checkPlayerProjectiles(this.projectiles, this.enemies);
     this.collisions.checkEnemyProjectiles(this.projectiles, this.player);
@@ -345,7 +437,13 @@ export class GameEngine {
       for (const p of this.projectiles) p.draw(ctx);
       if (!this.player.isDead) this.player.draw(ctx);
       this.particles.draw(ctx);
+      this.drawShockwaves(ctx);
+      if (this.timeFreeze > 0) {
+        ctx.fillStyle = 'rgba(123, 223, 242, 0.12)';
+        ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+      }
       this.drawHud(ctx);
+      this.drawAbilityBar(ctx);
       if (this.boss && this.boss.alive) this.drawBossBar(ctx);
       if (this.banner) this.drawBanner(ctx);
       if (this.alert) this.drawAlert(ctx);
@@ -409,6 +507,61 @@ export class GameEngine {
       ctx.fillRect(WORLD_WIDTH / 2 - 100, 30, 200 * this.waves.progress, 4);
     }
     ctx.textAlign = 'left';
+  }
+
+  drawShockwaves(ctx) {
+    ctx.save();
+    for (const w of this.shockwaves) {
+      ctx.globalAlpha = Math.max(0, 1 - w.radius / (WORLD_WIDTH * 1.2));
+      ctx.strokeStyle = w.color;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Knowledge Energy meter and the four ability slots (keys 1-4).
+  drawAbilityBar(ctx) {
+    const { abilities } = this;
+    const baseY = WORLD_HEIGHT - 58;
+    ctx.save();
+    ctx.font = '11px Segoe UI, sans-serif';
+    ctx.fillStyle = '#e6f1ff';
+    ctx.fillText(`KNOWLEDGE ENERGY ${Math.floor(abilities.energy)}/${abilities.maxEnergy}`, WORLD_WIDTH - 236, baseY - 8);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(WORLD_WIDTH - 236, baseY - 4, 220, 6);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(WORLD_WIDTH - 236, baseY - 4, 220 * (abilities.energy / abilities.maxEnergy), 6);
+
+    for (let slot = 1; slot <= 4; slot += 1) {
+      const x = WORLD_WIDTH - 236 + (slot - 1) * 56;
+      const y = baseY + 6;
+      const info = abilities.slotInfo(slot);
+      const ready = info && !abilities.blockedReason(slot);
+      ctx.fillStyle = info ? 'rgba(13, 22, 48, 0.85)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(x, y, 50, 40);
+      ctx.strokeStyle = !info ? 'rgba(255,255,255,0.15)' : ready ? '#39f3c4' : 'rgba(255,209,102,0.5)';
+      ctx.lineWidth = info && info.tier === 'elite' ? 2.5 : 1;
+      ctx.strokeRect(x, y, 50, 40);
+      if (info && info.cooldownLeft > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(x, y, 50, 40 * (info.cooldownLeft / info.cooldown));
+      }
+      ctx.fillStyle = info ? '#e6f1ff' : '#55617a';
+      ctx.font = 'bold 12px Segoe UI, sans-serif';
+      ctx.fillText(String(slot), x + 4, y + 13);
+      ctx.font = '9px Segoe UI, sans-serif';
+      if (info) {
+        const short = info.name.split(' ').map((w) => w[0]).join('').slice(0, 3);
+        ctx.fillText(short + (info.tier === 'enhanced' ? '+' : info.tier === 'elite' ? '★' : ''), x + 18, y + 13);
+        ctx.fillText(`${info.cost}⚡`, x + 4, y + 34);
+      } else {
+        ctx.fillText('locked', x + 12, y + 28);
+      }
+    }
+    ctx.restore();
   }
 
   drawBossBar(ctx) {

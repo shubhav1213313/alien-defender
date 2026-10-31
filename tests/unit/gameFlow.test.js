@@ -48,8 +48,10 @@ describe('Wave flow, Earth shield and end conditions', () => {
     expect(over).toHaveBeenCalledWith(expect.objectContaining({ reason: 'earthFallen', difficulty: 'normal' }));
   });
 
-  test('clearing a wave awards a bonus and shows the next wave banner', () => {
+  test('clearing a wave awards a bonus and automatically opens the Knowledge Arena', () => {
     const engine = new GameEngine({ input: fakeInput() });
+    const arenaOpen = jest.fn();
+    engine.bus.on('arena:open', arenaOpen);
     engine.waves.waves = TINY_WAVES;
     engine.startGame('normal');
     step(engine, 2.6); // banner
@@ -59,11 +61,15 @@ describe('Wave flow, Earth shield and end conditions', () => {
     const scoreAfterKill = engine.score;
     engine.update(0.016);
     expect(engine.score).toBe(scoreAfterKill + 500);
+    expect(engine.state.state).toBe(GameState.QUIZ);
+    expect(arenaOpen).toHaveBeenCalledWith({ wave: 1, postBoss: false, nextWave: 2 });
+    // Finishing the arena leads to the next wave banner.
+    engine.finishArena();
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
     expect(engine.banner).toEqual({ title: 'WAVE 2', subtitle: 'Test B' });
   });
 
-  test('clearing the final wave summons the boss instead of a sixth wave', () => {
+  test('clearing the final wave summons the boss (no arena before the boss)', () => {
     const engine = new GameEngine({ input: fakeInput() });
     const bossSpawn = jest.fn();
     const waveStart = jest.fn();
@@ -76,6 +82,7 @@ describe('Wave flow, Earth shield and end conditions', () => {
       step(engine, 1);
       killAllEnemies(engine);
       engine.update(0.016);
+      if (engine.state.is(GameState.QUIZ)) engine.finishArena();
     }
     expect(engine.state.state).toBe(GameState.WAVE_TRANSITION);
     expect(engine.banner.title).toBe('WARNING');
@@ -85,10 +92,12 @@ describe('Wave flow, Earth shield and end conditions', () => {
     expect(waveStart).toHaveBeenCalledTimes(2); // no "wave 3"
   });
 
-  test('destroying the boss wins the game and clears its escorts and bullets', () => {
+  test('destroying the boss opens the post-boss bonus arena, then victory', () => {
     const engine = new GameEngine({ input: fakeInput() });
     const victory = jest.fn();
+    const arenaOpen = jest.fn();
     engine.bus.on('game:victory', victory);
+    engine.bus.on('arena:open', arenaOpen);
     engine.waves.waves = TINY_WAVES.slice(0, 1);
     engine.startGame('normal');
     step(engine, 2.6);
@@ -100,9 +109,13 @@ describe('Wave flow, Earth shield and end conditions', () => {
     engine.spawnEnemy('scout', 100, 100);
     engine.boss.phaseShield = 0;
     engine.hitEnemy(engine.boss, engine.boss.health);
-    expect(engine.state.state).toBe(GameState.VICTORY);
+    expect(engine.state.state).toBe(GameState.QUIZ);
+    expect(arenaOpen).toHaveBeenLastCalledWith({ wave: 5, postBoss: true, nextWave: null });
     expect(engine.enemies.filter((e) => e.alive)).toHaveLength(0);
     expect(engine.projectiles.some((p) => p.owner === 'enemy')).toBe(false);
+    expect(victory).not.toHaveBeenCalled();
+    engine.finishArena();
+    expect(engine.state.state).toBe(GameState.VICTORY);
     expect(victory).toHaveBeenCalledWith(expect.objectContaining({ reason: 'victory', bossDefeated: true }));
   });
 
