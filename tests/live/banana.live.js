@@ -3,7 +3,7 @@
 // Run with: npm run test:live
 const request = require('supertest');
 const { fetchBananaPuzzle } = require('../../src/services/bananaService');
-const { createApp } = require('../../src/app');
+const { createTestApp } = require('../helpers/testApp');
 
 jest.setTimeout(30000);
 
@@ -17,7 +17,7 @@ describe('LIVE: Marc Conrad Banana API', () => {
   });
 
   test('full arena over HTTP uses live puzzles (not the offline fallback)', async () => {
-    const app = createApp({ rateLimiting: false });
+    const { app } = createTestApp(); // real Banana API, in-memory DB
     const created = await request(app).post('/api/challenges').send({ wave: 1, difficulty: 'normal' }).expect(201);
     const id = created.body.data.arenaId;
     const sources = [];

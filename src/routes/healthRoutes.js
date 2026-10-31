@@ -1,10 +1,22 @@
 const express = require('express');
 
-const router = express.Router();
+// GET /api/health - liveness check, plus a database check when configured.
+function createHealthRouter({ checkDatabase } = {}) {
+  const router = express.Router();
+  router.get('/', async (req, res) => {
+    let database = 'not-configured';
+    let databaseLatencyMs = null;
+    if (checkDatabase) {
+      try {
+        databaseLatencyMs = (await checkDatabase()).latencyMs;
+        database = 'ok';
+      } catch {
+        database = 'unavailable';
+      }
+    }
+    res.json({ success: true, status: 'ok', uptimeSeconds: Math.round(process.uptime()), database, databaseLatencyMs });
+  });
+  return router;
+}
 
-// GET /api/health - liveness check used by tests and the demo.
-router.get('/', (req, res) => {
-  res.json({ success: true, status: 'ok', uptimeSeconds: Math.round(process.uptime()) });
-});
-
-module.exports = router;
+module.exports = { createHealthRouter };

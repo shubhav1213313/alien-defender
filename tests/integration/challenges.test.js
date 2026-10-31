@@ -1,7 +1,7 @@
 // Integration tests for the Knowledge Challenge Arena REST API.
 // The Banana API is MOCKED here (see tests/live for the real connectivity check).
 const request = require('supertest');
-const { createApp } = require('../../src/app');
+const { createTestApp } = require('../helpers/testApp');
 const { ChallengeService } = require('../../src/services/challengeService');
 const { PuzzleService } = require('../../src/services/puzzleService');
 const { BananaApiError } = require('../../src/services/bananaService');
@@ -14,7 +14,7 @@ function appWith(fetchPuzzle) {
     fetchPuzzle: fetchPuzzle || (async () => ({ image: 'data:image/png;base64,AAAA', solution: SOLUTIONS[i++ % 4], source: 'banana', latencyMs: 250 })),
     logger: { warn: () => {} },
   });
-  return createApp({ challengeService: new ChallengeService({ puzzleProvider: puzzles }), rateLimiting: false });
+  return createTestApp({ challengeService: new ChallengeService({ puzzleProvider: puzzles }) }).app;
 }
 
 async function startArena(app, wave = 1, difficulty = 'normal') {
@@ -159,7 +159,7 @@ describe('Banana API outage', () => {
 
 describe('Rate limiting', () => {
   test('creating too many arenas in a minute returns 429', async () => {
-    const app = createApp({
+    const { app } = createTestApp({
       challengeService: new ChallengeService({ puzzleProvider: { getPuzzle: async () => ({}) } }),
       rateLimiting: true,
     });

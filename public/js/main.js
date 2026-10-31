@@ -3,6 +3,10 @@ import { InputHandler } from './game/InputHandler.js';
 import { GameEngine } from './game/GameEngine.js';
 import { getDifficulty } from './game/DifficultySettings.js';
 import { KnowledgeArena } from './ui/KnowledgeArena.js';
+import { Panels } from './ui/Panels.js';
+import { AccountUI } from './ui/AccountUI.js';
+import { ProfileView, LeaderboardView } from './ui/PlayerViews.js';
+import { GameRecorder } from './ui/GameRecorder.js';
 
 const canvas = document.getElementById('game-canvas');
 canvas.width = WORLD_WIDTH;
@@ -12,14 +16,32 @@ const input = new InputHandler(window);
 const engine = new GameEngine({ canvas, input });
 const { bus } = engine;
 
-// The arena listens for 'arena:open' and drives the puzzle screens.
-new KnowledgeArena({ engine, root: document.getElementById('screen-arena') });
+// ---- Virtual identity: account, profile, leaderboard, saved games --------
+const panels = new Panels();
+const account = new AccountUI({ bus, panels });
+const recorder = new GameRecorder({ engine, account });
+const profile = new ProfileView({ container: document.querySelector('[data-profile-body]'), account });
+const leaderboard = new LeaderboardView({
+  container: document.querySelector('[data-leaderboard-body]'),
+  tabs: [...document.querySelectorAll('[data-board]')],
+  account,
+});
+panels.onOpen('profile', () => profile.load());
+panels.onOpen('leaderboard', () => leaderboard.load());
+account.restore();
+
+// The arena listens for 'arena:open' and drives the puzzle screens. Arena
+// results are linked to the saved game for logged-in players.
+new KnowledgeArena({ engine, root: document.getElementById('screen-arena'), getGameSessionId: () => recorder.gameSessionId });
 
 const selectedDifficulty = () => document.querySelector('input[name="difficulty"]:checked').value;
-const startGame = () => engine.startGame(selectedDifficulty());
+const startGame = () => {
+  panels.close();
+  engine.startGame(selectedDifficulty());
+};
 
 // ---- Overlay screens follow the game state (event-driven UI) -------------
-const overlays = document.querySelectorAll('.overlay');
+const overlays = document.querySelectorAll('.overlay[data-state]');
 function showOverlayFor(state) {
   overlays.forEach((el) => { el.hidden = el.dataset.state !== state; });
 }
@@ -63,8 +85,11 @@ document.getElementById('btn-quit').addEventListener('click', () => engine.quitT
 document.querySelectorAll('[data-action="restart"]').forEach((b) => b.addEventListener('click', startGame));
 document.querySelectorAll('[data-action="menu"]').forEach((b) => b.addEventListener('click', () => engine.quitToMenu()));
 
-// Enter starts a game from the menu or an end screen (ignored mid-game).
-input.on('confirm', startGame);
+// Enter starts a game from the menu or an end screen (ignored mid-game and
+// while a panel such as the login form is open).
+input.on('confirm', () => {
+  if (!panels.current) startGame();
+});
 
 // Auto-pause when the tab is hidden so the player is not hit while away.
 document.addEventListener('visibilitychange', () => {
