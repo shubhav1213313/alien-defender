@@ -51,9 +51,9 @@ export class KnowledgeArena {
 
   async open({ kind = 'wave', wave, nextWave }) {
     Object.assign(this, { kind, wave, nextWave, arena: null, reward: null, busy: false, correctSoFar: 0, answerable: false });
-    this.title.textContent = TITLES[kind];
+    this.title.textContent = kind === 'wave' ? `WAVE ${wave} CLEARED!` : TITLES[kind];
     this.subtitle.textContent = kind === 'wave'
-      ? `Wave ${wave} cleared! Combat is paused. Solve the Banana puzzles before Wave ${nextWave}.`
+      ? `${TITLES.wave}: combat is paused. Solve the Banana puzzles before Wave ${nextWave}.`
       : kind === 'bonus'
         ? 'The Mothership is destroyed. Two final puzzles for bonus points.'
         : 'Combat is paused while you solve this puzzle.';

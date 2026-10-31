@@ -91,6 +91,7 @@ export class GameEngine {
     this.resumeState = GameState.PLAYING;
     this.boss = null;
     this.pendingBoss = false;
+    this.pendingRetry = false; // a failed wave is replayed after its banner
     this.alert = null; // short centre-screen message, e.g. "PHASE 2"
     this.abilities.reset();
     this.stunTimer = 0; // EMP Shockwave: aliens frozen while > 0
@@ -131,6 +132,7 @@ export class GameEngine {
     });
     bus.on('enemy:escaped', ({ enemy }) => this.damageEarth(enemy.escapeDamage));
     bus.on('wave:complete', ({ wave, isFinal }) => this.onWaveComplete(wave, isFinal));
+    bus.on('wave:failed', ({ wave, kills, required }) => this.onWaveFailed(wave, kills, required));
   }
 
   // ---- World interactions --------------------------------------------------
@@ -281,7 +283,7 @@ export class GameEngine {
   // Shows the "WAVE N" banner, then launches the wave when the timer runs out.
   beginWaveTransition() {
     const next = this.waves.nextWave;
-    this.banner = { title: `WAVE ${this.waves.waveNumber + 1}`, subtitle: next.name };
+    this.banner = { title: `WAVE ${this.waves.waveNumber + 1} STARTING`, subtitle: next.name };
     this.transitionTimer = WAVE_BANNER_SECONDS;
     this.state.transition(GameState.WAVE_TRANSITION);
   }
@@ -296,6 +298,16 @@ export class GameEngine {
     } else {
       this.openArena(wave);
     }
+  }
+
+  // Every alien is gone but too few were destroyed: no bonus, no quiz -
+  // show the failure banner, then replay the same wave.
+  onWaveFailed(wave, kills, required) {
+    this.cancelSpecialOffer();
+    this.banner = { title: 'WAVE FAILED — NOT ENOUGH KILLS', subtitle: `Kills ${kills}/${required} · retrying Wave ${wave}` };
+    this.transitionTimer = WAVE_BANNER_SECONDS;
+    this.pendingRetry = true;
+    this.state.transition(GameState.WAVE_TRANSITION);
   }
 
   // ---- Knowledge Challenges ------------------------------------------------
@@ -517,6 +529,10 @@ export class GameEngine {
         if (this.pendingBoss) {
           this.pendingBoss = false;
           this.spawnBoss();
+        } else if (this.pendingRetry) {
+          this.pendingRetry = false;
+          this.waves.retryWave();
+          this.scheduleSpecialOffer();
         } else {
           this.waves.startNextWave();
           this.scheduleSpecialOffer();
@@ -651,6 +667,10 @@ export class GameEngine {
       ctx.fillRect(WORLD_WIDTH / 2 - 100, 30, 200, 4);
       ctx.fillStyle = '#c77dff';
       ctx.fillRect(WORLD_WIDTH / 2 - 100, 30, 200 * this.waves.progress, 4);
+      const { kills, requiredKills, remaining, total } = this.waves;
+      ctx.fillStyle = '#e6f1ff';
+      ctx.font = '12px Orbitron, Segoe UI, sans-serif';
+      ctx.fillText(`KILLS: ${kills}/${requiredKills} REQUIRED · ALIENS LEFT: ${remaining}/${total}`, WORLD_WIDTH / 2, 50);
     }
     ctx.textAlign = 'left';
   }
@@ -788,6 +808,9 @@ export class GameEngine {
     ctx.shadowColor = '#39f3c4';
     ctx.shadowBlur = 20;
     ctx.font = 'bold 54px Orbitron, Segoe UI, sans-serif';
+    // Long titles (e.g. "WAVE FAILED — NOT ENOUGH KILLS") shrink to fit.
+    const width = ctx.measureText(this.banner.title).width;
+    if (width > WORLD_WIDTH - 40) ctx.font = `bold ${Math.floor((54 * (WORLD_WIDTH - 40)) / width)}px Orbitron, Segoe UI, sans-serif`;
     ctx.fillText(this.banner.title, WORLD_WIDTH / 2, WORLD_HEIGHT / 2 - 10);
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#e6f1ff';

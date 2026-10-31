@@ -75,7 +75,7 @@ describe('Compulsory 2-puzzle quiz', () => {
     const { bus, body } = setup();
     bus.emit('arena:open', { kind: 'wave', wave: 1, nextWave: 2 });
     await flush();
-    expect(document.querySelector('[data-arena="title"]').textContent).toBe('Knowledge Challenge');
+    expect(document.querySelector('[data-arena="title"]').textContent).toBe('WAVE 1 CLEARED!');
     expect(body().querySelector('.reward-preview').textContent).toBe('SOLVE BOTH PUZZLES TO UNLOCK PLASMA SHIELD');
     expect(body().querySelector('.arena-instructions').textContent).toMatch(/0-9 buttons/);
     expect(body().textContent).toMatch(/next wave starts afterwards/);

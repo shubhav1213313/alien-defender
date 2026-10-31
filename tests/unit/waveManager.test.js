@@ -63,9 +63,38 @@ describe('WaveManager', () => {
     manager.update(0.05, 3);
     expect(events.find((e) => e[0] === 'complete')).toBeUndefined();
     expect(manager.remaining).toBe(3);
+    for (let i = 0; i < manager.requiredKills; i += 1) manager.bus.emit('enemy:destroyed', { enemy: {} });
     manager.update(0.05, 0);
     expect(events.find((e) => e[0] === 'complete')).toEqual(['complete', { wave: 1, isFinal: false }]);
     expect(manager.progress).toBe(1);
+  });
+
+  test('counts kills and aliens remaining for the HUD, resetting each wave', () => {
+    const { manager, spawned } = setup();
+    manager.startNextWave();
+    const total = countOf(WAVES[0]);
+    expect(manager).toMatchObject({ kills: 0, remaining: total, total });
+    manager.update(2, 0);
+    expect(spawned.length).toBeGreaterThan(1);
+    manager.bus.emit('enemy:destroyed', { enemy: { isBoss: false } });
+    manager.update(0.01, spawned.length - 1); // one destroyed, the rest still on screen
+    expect(manager.kills).toBe(1);
+    expect(manager.remaining).toBe(total - 1);
+    manager.bus.emit('enemy:destroyed', { enemy: { isBoss: true } }); // the boss is not a wave kill
+    expect(manager.kills).toBe(1);
+    manager.startNextWave();
+    expect(manager).toMatchObject({ kills: 0, remaining: countOf(WAVES[1]) });
+  });
+
+  test('aliens that leave without being destroyed fail the wave; retryWave replays it', () => {
+    const { manager, events } = setup();
+    manager.startNextWave();
+    expect(manager.requiredKills).toBe(Math.ceil(countOf(WAVES[0]) / 2));
+    for (let i = 0; i < 2000 && manager.queue.length; i += 1) manager.update(0.05, 0); // all escape
+    expect(manager.kills).toBe(0);
+    expect(events.find((e) => e[0] === 'complete')).toBeUndefined();
+    manager.retryWave();
+    expect(manager).toMatchObject({ waveNumber: 1, kills: 0, remaining: countOf(WAVES[0]), active: true });
   });
 
   test('the last wave is flagged as final and no more waves start', () => {
@@ -73,6 +102,7 @@ describe('WaveManager', () => {
     const { manager, events } = setup(tiny);
     manager.startNextWave();
     manager.update(1, 0); // spawns the scout
+    manager.bus.emit('enemy:destroyed', { enemy: {} }); // the player shoots it
     manager.update(0.1, 0); // scout gone -> complete
     expect(events.at(-1)).toEqual(['complete', { wave: 1, isFinal: true }]);
     expect(manager.startNextWave()).toBe(false);
