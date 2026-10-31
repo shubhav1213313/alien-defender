@@ -9,6 +9,27 @@ mathematics puzzles. Built for **CIS046-3 Software for Enterprise**.
 > leaderboard and achievements. Still to come: second external API, RBAC
 > admin area, CSRF tokens, audio and final polish.
 
+## Second external API: ZenQuotes
+
+Motivational quotes on the menu, game-over and victory screens come from
+[ZenQuotes](https://zenquotes.io/) **via our server** (verified behaviour, 2026-10-31):
+
+- One call to `https://zenquotes.io/api/quotes` returns 50 quotes, which
+  are **cached for an hour** and shared by every player - as the ZenQuotes
+  docs recommend. Concurrent requests share a single API call.
+- The free tier allows **5 requests per 30 s per IP** and sends no CORS
+  headers, so the browser could not call it directly anyway.
+- When rate limited, ZenQuotes still answers HTTP 200 with a fake quote
+  ("Too many requests…"); the service detects this as `RATE_LIMITED`.
+- **3 s timeout**; after a failure it waits 60 s before retrying, keeps
+  serving the old cache if it has one, and otherwise uses built-in
+  fallback quotes labelled "offline quote". Quotes are never requested
+  during gameplay, so the API can never slow the game down.
+- The required attribution link to https://zenquotes.io/ is shown with
+  every ZenQuotes quote.
+- The top bar shows the last **measured latency** of both external APIs
+  (`GET /api/status`, which reports measurements and never calls the APIs).
+
 ## Player accounts (virtual identity)
 
 - **Register / log in** (username or email) from the menu. Guests can still
@@ -200,6 +221,8 @@ games, scores, quiz attempts and trophies.
 | GET | `/api/profile` | **login** | Stats, recent games, achievements with unlock dates |
 | GET | `/api/leaderboard` | none | `?difficulty=all\|easy\|normal\|hard&limit=1-50` best score per player |
 | GET | `/api/achievements` | none | Achievement catalogue |
+| GET | `/api/quotes/random` | none | `?context=menu\|gameover\|victory` → `{ quote, author, source: "zenquotes"\|"fallback", stale, attribution }` |
+| GET | `/api/status` | none | Last measured status/latency of the Banana and ZenQuotes APIs |
 | GET | `/api/challenges/rules?wave=N` | none | Difficulty rules, reward table, abilities on offer |
 | POST | `/api/challenges` | none* | `{ wave, difficulty, gameSessionId? }` → new arena (rate limited: 20/min) |
 | GET | `/api/challenges/:id` | none* | Arena progress |

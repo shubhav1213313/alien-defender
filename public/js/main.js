@@ -7,6 +7,7 @@ import { Panels } from './ui/Panels.js';
 import { AccountUI } from './ui/AccountUI.js';
 import { ProfileView, LeaderboardView } from './ui/PlayerViews.js';
 import { GameRecorder } from './ui/GameRecorder.js';
+import { QuoteView, ApiStatusIndicator } from './ui/InfoWidgets.js';
 
 const canvas = document.getElementById('game-canvas');
 canvas.width = WORLD_WIDTH;
@@ -29,6 +30,12 @@ const leaderboard = new LeaderboardView({
 panels.onOpen('profile', () => profile.load());
 panels.onOpen('leaderboard', () => leaderboard.load());
 account.restore();
+
+// ---- Second external API (ZenQuotes) and API latency indicator ------------
+const quotes = new QuoteView({ bus });
+const apiStatus = new ApiStatusIndicator({ bus, element: document.getElementById('api-status') });
+quotes.load('menu');
+apiStatus.refresh();
 
 // The arena listens for 'arena:open' and drives the puzzle screens. Arena
 // results are linked to the saved game for logged-in players.

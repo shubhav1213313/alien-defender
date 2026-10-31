@@ -1,4 +1,4 @@
-// LIVE test - calls the REAL Banana API over the internet.
+// LIVE tests - call the REAL Banana and ZenQuotes APIs over the internet.
 // Not part of `npm test` (which is fully mocked and offline).
 // Run with: npm run test:live
 const request = require('supertest');
@@ -29,5 +29,26 @@ describe('LIVE: Marc Conrad Banana API', () => {
     console.log(`Live arena question sources: ${sources.join(', ')}`);
     expect(sources.every((s) => s.startsWith('banana'))).toBe(true);
     await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+  });
+});
+
+describe('LIVE: ZenQuotes API', () => {
+  const { fetchZenQuotes, QuoteService } = require('../../src/services/quoteService');
+
+  // ONE real call (the free tier allows 5 per 30 seconds). If the limit was
+  // already used up by someone on this IP, RATE_LIMITED is reported and
+  // the fallback path is verified instead.
+  test('batch endpoint returns real quotes, or a correctly detected rate limit', async () => {
+    try {
+      const { quotes, latencyMs } = await fetchZenQuotes({ timeoutMs: 10000 });
+      expect(quotes.length).toBeGreaterThan(10);
+      expect(quotes[0]).toEqual({ quote: expect.any(String), author: expect.any(String) });
+      console.log(`ZenQuotes OK - ${quotes.length} quotes in ${latencyMs}ms, e.g. "${quotes[0].quote}" - ${quotes[0].author}`);
+    } catch (err) {
+      expect(err.code).toBe('RATE_LIMITED');
+      console.log('ZenQuotes rate limit active - detected correctly');
+      const fallback = await new QuoteService({ fetchQuotes: async () => { throw err; }, logger: { warn() {} } }).getQuote('menu');
+      expect(fallback.source).toBe('fallback');
+    }
   });
 });
