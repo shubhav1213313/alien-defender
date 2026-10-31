@@ -20,8 +20,14 @@
       <section id="screen-menu" class="overlay" data-state="menu">
         <h2 class="title">ALIEN DEFENDER</h2>
         <p class="tagline">The Last Stand</p>
+        <fieldset class="difficulty" aria-label="Difficulty">
+          <legend>Difficulty</legend>
+          <label><input type="radio" name="difficulty" value="easy"><span><strong>Easy</strong><small>Slower aliens, sturdier Earth</small></span></label>
+          <label><input type="radio" name="difficulty" value="normal" checked><span><strong>Normal</strong><small>The intended challenge</small></span></label>
+          <label><input type="radio" name="difficulty" value="hard"><span><strong>Hard</strong><small>Faster, tougher, 1.5x score</small></span></label>
+        </fieldset>
         <button id="btn-start" class="btn primary">Start Game</button>
-        <p class="controls">WASD / Arrows: move · Space: shoot · P / Esc: pause</p>
+        <p class="controls">WASD / Arrows: move · Space: shoot · P / Esc: pause · Enter: start</p>
       </section>
 
       <section id="screen-paused" class="overlay" data-state="paused" hidden>
@@ -31,10 +37,17 @@
       </section>
 
       <section id="screen-gameover" class="overlay" data-state="gameOver" hidden>
-        <h2 class="danger">Earth Has Fallen</h2>
-        <p id="gameover-summary"></p>
-        <button id="btn-restart" class="btn primary">Play Again</button>
-        <button id="btn-menu" class="btn">Main Menu</button>
+        <h2 id="gameover-title" class="danger">Earth Has Fallen</h2>
+        <dl id="gameover-summary" class="summary"></dl>
+        <button class="btn primary" data-action="restart">Play Again</button>
+        <button class="btn" data-action="menu">Main Menu</button>
+      </section>
+
+      <section id="screen-victory" class="overlay" data-state="victory" hidden>
+        <h2 class="victory">Earth Is Safe</h2>
+        <dl id="victory-summary" class="summary"></dl>
+        <button class="btn primary" data-action="restart">Play Again</button>
+        <button class="btn" data-action="menu">Main Menu</button>
       </section>
     </div>
   </main>
