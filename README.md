@@ -122,10 +122,10 @@ when healthy, red when low, flickering whenever an alien gets through. A
 pulsing red vignette warns when the hull is low. Animations respect the
 "reduce motion" accessibility setting.
 
-## Knowledge Challenges (Banana API)
+## Knowledge Challenges (fixed questions + Banana API)
 
 There is **no Upgrade Bay** in this game. Between waves the only screen
-is the compulsory Banana quiz.
+is the compulsory two-question quiz.
 
 **Compulsory quiz after waves 1, 2, 3 and 4.** The moment the last alien
 of a wave is gone, enemy spawning and combat stop and the quiz opens
@@ -134,9 +134,23 @@ nothing), but it never blocks progress:
 
 1. Instructions and the reward preview, e.g. **"SOLVE BOTH PUZZLES TO
    UNLOCK PLASMA SHIELD"**.
-2. **Two** genuine Marc Conrad Banana API puzzles, shown unmodified.
+2. **Two** questions:
+   - **Waves 1–3: local fixed quiz questions** (not Banana API puzzles),
+     the same and in the same order every game, labelled *"Local fixed
+     question"* on screen. They are stored only on the server
+     ([src/services/fixedQuizQuestions.js](src/services/fixedQuizQuestions.js));
+     the browser gets the question text, never the answer.
+
+     | Wave | Question 1 | Question 2 |
+     |---|---|---|
+     | 1 | 3 + 2 = ? | 7 - 3 = ? |
+     | 2 | 4 × 2 = ? | 9 - 3 = ? |
+     | 3 | 3 × 3 = ? | 8 - 6 = ? |
+   - **Wave 4: two genuine Marc Conrad Banana API puzzles**, fetched fresh
+     each game and shown unmodified. If the API repeats a puzzle within the
+     quiz, the server fetches another one.
 3. Answer with the **0–9 buttons** (or number keys); one answer per
-   puzzle, 45 s each, one honest hint per puzzle (parity and range - never
+   question, checked on the server, 45 s each, one honest hint per puzzle (parity and range - never
    the answer). Wrong answers show the solution.
 4. **2/2** unlocks that wave's ability; **0/2 or 1/2** unlocks nothing.
    Either way the next wave starts.
@@ -291,7 +305,7 @@ games, scores, quiz attempts and trophies.
 | GET | `/api/challenges/rules?kind=K&wave=N` | none | `kind` = `wave` (waves 1-4), `bonus` (5) or `special`: puzzle count, time, hint rule, reward preview |
 | POST | `/api/challenges` | none* | `{ kind, wave, difficulty?, gameSessionId? }` → new challenge (rate limited: 20/min) |
 | GET | `/api/challenges/:id` | none* | Challenge progress |
-| GET | `/api/challenges/:id/question` | none* | Current genuine Banana puzzle image + latency (never the solution); `503 PUZZLE_API_UNAVAILABLE` if the API is down |
+| GET | `/api/challenges/:id/question` | none* | Current question: fixed question text (waves 1–3) or genuine Banana puzzle image + latency (never the solution); `503 PUZZLE_API_UNAVAILABLE` if the API is down |
 | POST | `/api/challenges/:id/answer` | none* | `{ questionIndex, answer }` → correct?, solution revealed; 409 on duplicates |
 | POST | `/api/challenges/:id/hint` | none* | Once per puzzle; 403 on the special puzzle |
 | POST | `/api/challenges/:id/claim` | none* | Server-calculated rewards, once per challenge (409 on repeat) |

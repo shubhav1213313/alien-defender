@@ -19,21 +19,28 @@ describe('LIVE: Marc Conrad Banana API', () => {
   // The solution is never sent before answering, so the live test cannot
   // know it in advance: it answers 0 and checks that the server marks the
   // answer and reveals each live puzzle's solution afterwards.
+  // Wave 4 is the only post-wave quiz that uses the Banana API (waves 1-3
+  // are local fixed questions); its two puzzles must be different.
   test.each([
-    ['wave', 1, 2],
+    ['wave', 4, 2],
     ['special', 3, 1],
-  ])('%s challenge over HTTP uses %#: live Banana puzzles end to end', async (kind, wave, count) => {
+  ])('%s challenge (wave %i) over HTTP: live Banana puzzles end to end', async (kind, wave, count) => {
     const { app } = createTestApp(); // real Banana API, in-memory DB
     const created = await request(app).post('/api/challenges').send({ kind, wave }).expect(201);
     expect(created.body.data.totalQuestions).toBe(count);
     const id = created.body.data.arenaId;
     const seen = [];
+    const images = new Set();
     for (let i = 0; i < count; i += 1) {
       const q = await request(app).get(`/api/challenges/${id}/question`).expect(200);
+      expect(q.body.data.source).toBe('banana');
       expect(q.body.data.image).toMatch(/^data:image\/png;base64,iVBORw0KGgo/);
+      expect(JSON.stringify(q.body)).not.toMatch(/solution/);
+      images.add(q.body.data.image);
       const a = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: 0 }).expect(200);
       seen.push(`${q.body.data.source} ${q.body.data.latencyMs}ms -> solution ${a.body.data.correctAnswer}`);
     }
+    expect(images.size).toBe(count); // no duplicate puzzle within the quiz
     console.log(`Live ${kind} challenge: ${seen.join(' | ')}`);
     const claim = await request(app).post(`/api/challenges/${id}/claim`).expect(200);
     expect(claim.body.data.total).toBe(count);

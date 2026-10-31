@@ -1,13 +1,14 @@
-const { ChallengeService, SUBMIT_GRACE_SECONDS } = require('../../src/services/challengeService');
+const { ChallengeService, SUBMIT_GRACE_SECONDS, DUPLICATE_REFETCHES } = require('../../src/services/challengeService');
 const { PuzzleUnavailableError } = require('../../src/services/puzzleService');
 
 // Mock puzzle provider: solutions 3, 7, 1 in order (genuine-looking PNG data URIs).
+// Banana behaviour is tested on wave 4; waves 1-3 use local fixed questions.
 function mockProvider(solutions = [3, 7, 1]) {
   let i = 0;
   return { getPuzzle: jest.fn(async () => ({ image: `data:image/png;base64,AAAA${i}`, solution: solutions[i++ % solutions.length], source: 'banana', latencyMs: 100 })) };
 }
 
-function setup({ kind = 'wave', wave = 1, difficulty = 'normal', provider = mockProvider() } = {}) {
+function setup({ kind = 'wave', wave = 4, difficulty = 'normal', provider = mockProvider() } = {}) {
   let clock = 1_000_000;
   const service = new ChallengeService({ puzzleProvider: provider, now: () => clock, idGenerator: () => 'c1' });
   const arena = service.createArena({ kind, wave, difficulty });
@@ -115,7 +116,7 @@ describe('ChallengeService', () => {
   });
 
   test.each([
-    [[3, 7], 'plasmaShield'],
+    [[3, 7], 'empShockwave'],
     [[3, 0], null],
     [[0, 0], null],
   ])('answers %p -> ability %p, claimable once', async (answers, ability) => {
@@ -127,10 +128,77 @@ describe('ChallengeService', () => {
     expect(() => service.claimRewards('c1')).toThrow('already claimed');
   });
 
+  test('wave 4 fetches two different Banana puzzles, skipping a repeated one', async () => {
+    const images = ['P1', 'P1', 'P2'];
+    let i = 0;
+    const provider = { getPuzzle: jest.fn(async () => ({ image: images[i], solution: [3, 3, 8][i++], source: 'banana', latencyMs: 5 })) };
+    const { service } = setup({ provider });
+    const first = await service.getQuestion('c1');
+    service.submitAnswer('c1', { questionIndex: 0, answer: 3 });
+    const second = await service.getQuestion('c1');
+    expect([first.image, second.image]).toEqual(['P1', 'P2']);
+    expect(provider.getPuzzle).toHaveBeenCalledTimes(3);
+    expect(service.submitAnswer('c1', { questionIndex: 1, answer: 8 })).toMatchObject({ correct: true, correctCount: 2 });
+  });
+
+  test('if the Banana API keeps repeating the same puzzle: 503, nothing stored, Retry works', async () => {
+    let image = 'SAME';
+    const provider = { getPuzzle: jest.fn(async () => ({ image, solution: 1, source: 'banana', latencyMs: 5 })) };
+    const { service } = setup({ provider });
+    await service.getQuestion('c1');
+    service.submitAnswer('c1', { questionIndex: 0, answer: 1 });
+    await expect(service.getQuestion('c1')).rejects.toMatchObject({ status: 503, code: 'PUZZLE_API_UNAVAILABLE', expose: true });
+    expect(provider.getPuzzle).toHaveBeenCalledTimes(1 + DUPLICATE_REFETCHES + 1);
+    image = 'NEW';
+    expect((await service.getQuestion('c1')).image).toBe('NEW');
+  });
+
   test('expired or unknown challenges return 404', () => {
     const { service, advance } = setup();
     expect(() => service.getArena('nope')).toThrow(expect.objectContaining({ status: 404 }));
     advance(31 * 60);
     expect(() => service.getArena('c1')).toThrow(expect.objectContaining({ status: 404 }));
+  });
+});
+
+describe('Local fixed questions after waves 1-3', () => {
+  const FIXED = {
+    1: [['3 + 2 = ?', 5], ['7 - 3 = ?', 4]],
+    2: [['4 × 2 = ?', 8], ['9 - 3 = ?', 6]],
+    3: [['3 × 3 = ?', 9], ['8 - 6 = ?', 2]],
+  };
+  const ABILITY = { 1: 'plasmaShield', 2: 'hyperBlaster', 3: 'tripleBeam' };
+
+  test.each([1, 2, 3])('wave %i: the same two questions, in order, every game, without the Banana API', async (wave) => {
+    for (let game = 0; game < 2; game += 1) {
+      const { service, provider } = setup({ wave });
+      const asked = [];
+      for (let i = 0; i < 2; i += 1) {
+        const q = await service.getQuestion('c1');
+        expect(q).toMatchObject({ questionNumber: i + 1, totalQuestions: 2, source: 'local-fixed', image: null });
+        expect(JSON.stringify(q)).not.toMatch(/solution|correctAnswer/);
+        asked.push(q.text);
+        service.submitAnswer('c1', { questionIndex: i, answer: FIXED[wave][i][1] });
+      }
+      expect(asked).toEqual(FIXED[wave].map(([text]) => text));
+      expect(provider.getPuzzle).not.toHaveBeenCalled();
+    }
+  });
+
+  test.each([1, 2, 3])('wave %i: answers are checked on the server; 2/2 unlocks the ability', async (wave) => {
+    const { service } = setup({ wave });
+    const [[, a], [, b]] = FIXED[wave];
+    expect((await answerAll(service, [a, b])).map((r) => r.correct)).toEqual([true, true]);
+    expect(service.claimRewards('c1')).toMatchObject({ correct: 2, perfect: true, ability: { id: ABILITY[wave] } });
+  });
+
+  test.each([
+    [[5, 0], 1],
+    [[0, 0], 0],
+  ])('wave 1 answers %p -> %i/2, no ability, wrong answer revealed only after submitting', async (answers, correct) => {
+    const { service } = setup({ wave: 1 });
+    const results = await answerAll(service, answers);
+    expect(results[1]).toMatchObject({ correct: false, correctAnswer: 4 });
+    expect(service.claimRewards('c1')).toMatchObject({ correct, ability: null });
   });
 });

@@ -1,6 +1,7 @@
-// Rules and rewards for the Knowledge Challenges (Banana API puzzles).
+// Rules and rewards for the Knowledge Challenges.
 //
-//   wave    - COMPULSORY after waves 1-4: two puzzles. 2/2 unlocks that
+//   wave    - COMPULSORY after waves 1-4: two questions (waves 1-3 use LOCAL
+//             FIXED questions, wave 4 live Banana puzzles). 2/2 unlocks that
 //             wave's ability; 0/2 or 1/2 unlocks nothing, but the next wave
 //             always starts.
 //   bonus   - the Victory Bonus Challenge after the boss: two puzzles for
@@ -11,6 +12,8 @@
 // HONESTY NOTE: the Banana API has no difficulty parameter, so the special
 // puzzle is the same kind of puzzle - it is "hard" only because of the
 // shorter time limit and the missing hint, and the UI says so.
+const { fixedQuestionsFor, FIXED_SOURCE } = require('./fixedQuizQuestions');
+
 const FINAL_WAVE = 5;
 
 const KINDS = Object.freeze({
@@ -66,6 +69,7 @@ function describeChallenge(kind, wave) {
   const rules = KINDS[kind];
   const abilityId = abilityFor(kind, wave);
   const name = abilityId ? ABILITY_NAMES[abilityId] : null;
+  const fixed = fixedQuestionsFor(kind, wave) !== null;
   let preview;
   if (kind === 'wave') preview = `SOLVE BOTH PUZZLES TO UNLOCK ${name.toUpperCase()}`;
   else if (kind === 'special') preview = `SOLVE THIS PUZZLE TO UNLOCK ${name}`;
@@ -79,9 +83,12 @@ function describeChallenge(kind, wave) {
     energyPerCorrect: rules.energyPerCorrect,
     ability: abilityId ? { id: abilityId, name, slot: ABILITY_SLOTS[abilityId] } : null,
     preview,
+    source: fixed ? FIXED_SOURCE : 'banana',
     bonusPointsPerCorrect: kind === 'bonus' ? BONUS_POINTS : null,
-    note: 'Puzzles come live from the Banana API, which has no difficulty setting. '
-      + (kind === 'special' ? 'This one is harder only because of the 20-second limit and no hint.' : 'Each puzzle allows one answer.'),
+    note: fixed
+      ? 'These are local fixed quiz questions (not live Banana API puzzles). Each question allows one answer.'
+      : 'Puzzles come live from the Banana API, which has no difficulty setting. '
+        + (kind === 'special' ? 'This one is harder only because of the 20-second limit and no hint.' : 'Each puzzle allows one answer.'),
   };
 }
 

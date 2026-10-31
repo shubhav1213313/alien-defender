@@ -1,5 +1,6 @@
 // Integration tests for the Knowledge Challenge REST API.
 // The Banana API is MOCKED here (see tests/live for the real connectivity check).
+// Banana behaviour is tested on wave 4; waves 1-3 use local fixed questions.
 const request = require('supertest');
 const { createTestApp } = require('../helpers/testApp');
 const { ChallengeService } = require('../../src/services/challengeService');
@@ -11,13 +12,13 @@ const SOLUTIONS = [2, 8, 5];
 function appWith(fetchPuzzle) {
   let i = 0;
   const puzzles = new PuzzleService({
-    fetchPuzzle: fetchPuzzle || (async () => ({ image: 'data:image/png;base64,AAAA', solution: SOLUTIONS[i++ % SOLUTIONS.length], source: 'banana', latencyMs: 250 })),
+    fetchPuzzle: fetchPuzzle || (async () => ({ image: `data:image/png;base64,AAAA${i}`, solution: SOLUTIONS[i++ % SOLUTIONS.length], source: 'banana', latencyMs: 250 })),
     logger: { warn: () => {} },
   });
   return createTestApp({ challengeService: new ChallengeService({ puzzleProvider: puzzles }) }).app;
 }
 
-async function start(app, body = { kind: 'wave', wave: 1 }) {
+async function start(app, body = { kind: 'wave', wave: 4 }) {
   const res = await request(app).post('/api/challenges').send(body);
   expect(res.status).toBe(201);
   return res.body.data.arenaId;
@@ -55,6 +56,29 @@ describe('Challenge lifecycle', () => {
     expect(res.body.data).toMatchObject({ kind: 'wave', wave: 3, totalQuestions: 2, hintsAllowed: true });
   });
 
+  test('waves 1-3 are labelled as local fixed questions; wave 4 as live Banana puzzles', async () => {
+    const app = appWith();
+    for (const wave of [1, 2, 3]) {
+      expect((await request(app).get(`/api/challenges/rules?kind=wave&wave=${wave}`)).body.data).toMatchObject({ source: 'local-fixed', note: expect.stringMatching(/local fixed quiz questions/) });
+    }
+    expect((await request(app).get('/api/challenges/rules?kind=wave&wave=4')).body.data).toMatchObject({ source: 'banana', note: expect.stringMatching(/Banana API/) });
+  });
+
+  test('wave 2 over HTTP: "4 × 2 = ?" then "9 - 3 = ?", answers checked on the server, 2/2 unlocks Hyper Blaster', async () => {
+    const app = appWith(async () => { throw new Error('the Banana API must not be called for waves 1-3'); });
+    const id = await start(app, { kind: 'wave', wave: 2 });
+    const expected = [['4 × 2 = ?', 8], ['9 - 3 = ?', 6]];
+    for (let i = 0; i < 2; i += 1) {
+      const q = await request(app).get(`/api/challenges/${id}/question`).expect(200);
+      expect(q.body.data).toMatchObject({ text: expected[i][0], source: 'local-fixed', image: null });
+      expect(JSON.stringify(q.body)).not.toMatch(/solution|correctAnswer/);
+      const a = await request(app).post(`/api/challenges/${id}/answer`).send({ questionIndex: i, answer: expected[i][1] }).expect(200);
+      expect(a.body.data.correct).toBe(true);
+    }
+    const { body } = await request(app).post(`/api/challenges/${id}/claim`).expect(200);
+    expect(body.data).toMatchObject({ correct: 2, ability: { id: 'hyperBlaster' } });
+  });
+
   test('question responses contain the genuine image but never the solution', async () => {
     const app = appWith();
     const id = await start(app);
@@ -65,7 +89,7 @@ describe('Challenge lifecycle', () => {
   });
 
   test.each([
-    [[2, 8], 2, 'plasmaShield'],
+    [[2, 8], 2, 'empShockwave'],
     [[2, 0], 1, null],
     [[0, 0], 0, null],
   ])('answers %p -> %i/2, ability %p', async (answers, correct, ability) => {
