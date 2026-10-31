@@ -1,5 +1,6 @@
 import { apiRequest } from '../api/apiClient.js';
 import { ABILITIES } from '../game/AbilityDefinitions.js';
+import { el } from './dom.js';
 
 // Knowledge Challenge Arena UI.
 // Flow: intro (choose difficulty) -> 4 x (puzzle -> feedback) -> results.
@@ -10,21 +11,6 @@ import { ABILITIES } from '../game/AbilityDefinitions.js';
 
 const TIER_LABEL = { standard: 'Standard', enhanced: 'Enhanced', elite: 'ELITE' };
 const ACHIEVEMENT_NAMES = { legendary_defender: 'Legendary Defender' };
-
-// Tiny DOM helper: el('p', { class: 'x' }, 'text', childNode)
-function el(tag, attrs = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (key === 'class') node.className = value;
-    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
-    else if (value !== false && value !== null && value !== undefined) node.setAttribute(key, value === true ? '' : value);
-  }
-  for (const child of children.flat()) {
-    if (child === null || child === undefined || child === false) continue;
-    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
-  }
-  return node;
-}
 
 function abilityLabel(ability) {
   const def = ABILITIES[ability.id];
@@ -43,10 +29,13 @@ export function describeReward(reward) {
 }
 
 export class KnowledgeArena {
-  constructor({ engine, root, api = apiRequest }) {
+  // getGameSessionId: returns the saved game's id for logged-in players, so
+  // the server can record arena results against that game (null for guests).
+  constructor({ engine, root, api = apiRequest, getGameSessionId = () => null }) {
     this.engine = engine;
     this.root = root;
     this.api = api;
+    this.getGameSessionId = getGameSessionId;
     this.title = root.querySelector('[data-arena="title"]');
     this.subtitle = root.querySelector('[data-arena="subtitle"]');
     this.body = root.querySelector('[data-arena="body"]');
@@ -120,7 +109,10 @@ export class KnowledgeArena {
     this.difficulty = this.rules.difficulties.find((d) => d.id === difficulty);
     this.showLoading('Opening the arena…');
     try {
-      this.arena = await this.api('/api/challenges', { method: 'POST', body: { wave: this.wave, difficulty } });
+      const body = { wave: this.wave, difficulty };
+      const gameSessionId = this.getGameSessionId();
+      if (gameSessionId) body.gameSessionId = gameSessionId;
+      this.arena = await this.api('/api/challenges', { method: 'POST', body });
       this.busy = false;
       await this.loadQuestion();
     } catch (err) {

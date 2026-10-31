@@ -27,36 +27,59 @@ function parseAnswer(body) {
   return { questionIndex, answer };
 }
 
-function createChallengeController(service) {
+const requester = (req) => (req.session && req.session.userId) || null;
+
+// `scores` (optional) links arenas to a logged-in player's game and records
+// results in MySQL. Without it (or for guests) arenas still work.
+function createChallengeController(service, { scores, logger = console } = {}) {
   return {
     rules(req, res) {
       res.json({ success: true, data: describeArena(parseWave(req.query.wave)) });
     },
 
-    create(req, res) {
+    async create(req, res) {
       const body = req.body || {};
-      const arena = service.createArena({ wave: parseWave(body.wave), difficulty: body.difficulty });
+      const userId = requester(req);
+      let gameSessionId = null;
+      // Only the owner of an unfinished game can attach an arena to it.
+      if (userId && scores && body.gameSessionId !== undefined && body.gameSessionId !== null) {
+        gameSessionId = (await scores.ownedOpenSession(userId, body.gameSessionId)).id;
+      }
+      const arena = service.createArena({ wave: parseWave(body.wave), difficulty: body.difficulty, userId, gameSessionId });
       res.status(201).json({ success: true, data: arena });
     },
 
     show(req, res) {
-      res.json({ success: true, data: service.publicArena(service.getArena(req.params.id)) });
+      res.json({ success: true, data: service.publicArena(service.getArena(req.params.id, requester(req))) });
     },
 
     async question(req, res) {
-      res.json({ success: true, data: await service.getQuestion(req.params.id) });
+      res.json({ success: true, data: await service.getQuestion(req.params.id, requester(req)) });
     },
 
     answer(req, res) {
-      res.json({ success: true, data: service.submitAnswer(req.params.id, parseAnswer(req.body || {})) });
+      res.json({ success: true, data: service.submitAnswer(req.params.id, parseAnswer(req.body || {}), requester(req)) });
     },
 
     hint(req, res) {
-      res.json({ success: true, data: service.useHint(req.params.id) });
+      res.json({ success: true, data: service.useHint(req.params.id, requester(req)) });
     },
 
-    claim(req, res) {
-      res.json({ success: true, data: service.claimRewards(req.params.id) });
+    async claim(req, res) {
+      const reward = service.claimRewards(req.params.id, requester(req));
+      const arena = service.getArena(req.params.id, requester(req));
+      if (arena.userId && scores) {
+        try {
+          await scores.recordArena({
+            userId: arena.userId, gameSessionId: arena.gameSessionId, wave: reward.wave,
+            difficulty: reward.difficulty, correct: reward.correct, total: reward.total,
+          });
+        } catch (err) {
+          // Saving statistics must never cost the player their rewards.
+          logger.error('[arena] could not record quiz attempt:', err.message);
+        }
+      }
+      res.json({ success: true, data: reward });
     },
   };
 }

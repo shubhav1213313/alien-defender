@@ -1,8 +1,8 @@
 const request = require('supertest');
-const { createApp } = require('../../src/app');
+const { createTestApp } = require('../helpers/testApp');
 
 describe('Express application foundation', () => {
-  const app = createApp();
+  const { app } = createTestApp();
 
   test('GET /api/health returns ok JSON', async () => {
     const res = await request(app).get('/api/health');

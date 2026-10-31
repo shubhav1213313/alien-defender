@@ -27,7 +27,9 @@ class ChallengeService {
     this.arenas = new Map();
   }
 
-  createArena({ wave, difficulty }) {
+  // userId / gameSessionId are set when a logged-in player starts the arena
+  // during a recorded game; guests' arenas have neither.
+  createArena({ wave, difficulty, userId = null, gameSessionId = null }) {
     if (!Number.isInteger(wave) || wave < 1 || wave > FINAL_WAVE) {
       throw new ChallengeError(`wave must be an integer from 1 to ${FINAL_WAVE}`, 400);
     }
@@ -45,14 +47,18 @@ class ChallengeService {
       correctCount: 0,
       rewardsClaimed: false,
       createdAt: this.now(),
+      userId,
+      gameSessionId,
     };
     this.arenas.set(arena.id, arena);
     return this.publicArena(arena);
   }
 
-  getArena(id) {
+  // A player's arena is only visible to that player (404 for anyone else,
+  // so arena ids cannot be probed). Guest arenas rely on their random id.
+  getArena(id, requesterId = null) {
     const arena = this.arenas.get(id);
-    if (!arena || this.now() - arena.createdAt > this.ttlMs) {
+    if (!arena || this.now() - arena.createdAt > this.ttlMs || (arena.userId !== null && arena.userId !== requesterId)) {
       throw new ChallengeError('Challenge not found or expired', 404);
     }
     return arena;
@@ -80,8 +86,8 @@ class ChallengeService {
 
   // Returns the current question, fetching a puzzle the first time. Asking
   // again returns the SAME puzzle, so refreshing cannot reroll a hard one.
-  async getQuestion(id) {
-    const arena = this.getArena(id);
+  async getQuestion(id, requesterId = null) {
+    const arena = this.getArena(id, requesterId);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
     const index = arena.currentIndex;
     if (!arena.questions[index]) {
@@ -108,8 +114,8 @@ class ChallengeService {
   }
 
   // One scored submission per question. `answer` null = time ran out.
-  submitAnswer(id, { questionIndex, answer }) {
-    const arena = this.getArena(id);
+  submitAnswer(id, { questionIndex, answer }, requesterId = null) {
+    const arena = this.getArena(id, requesterId);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
     if (questionIndex !== arena.currentIndex) {
       throw new ChallengeError('This question has already been answered', 409);
@@ -138,8 +144,8 @@ class ChallengeService {
   }
 
   // Easy mode only: narrows the answer down without giving it away.
-  useHint(id) {
-    const arena = this.getArena(id);
+  useHint(id, requesterId = null) {
+    const arena = this.getArena(id, requesterId);
     if (!arena.rules.hintsAllowed) throw new ChallengeError('Hints are only available on Easy', 403);
     if (this.isComplete(arena)) throw new ChallengeError('All questions have been answered', 409);
     const q = arena.questions[arena.currentIndex];
@@ -152,8 +158,8 @@ class ChallengeService {
   }
 
   // Rewards are calculated here, on the server, and can be claimed once.
-  claimRewards(id) {
-    const arena = this.getArena(id);
+  claimRewards(id, requesterId = null) {
+    const arena = this.getArena(id, requesterId);
     if (!this.isComplete(arena)) throw new ChallengeError('Answer all four questions first', 409);
     if (arena.rewardsClaimed) throw new ChallengeError('Rewards already claimed', 409);
     arena.rewardsClaimed = true;

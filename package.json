@@ -9,7 +9,9 @@
     "dev": "node --watch src/server.js",
     "test": "jest",
     "test:coverage": "jest --coverage",
-    "test:live": "jest --testMatch **/tests/live/**/*.live.js --verbose"
+    "test:live": "jest --testMatch **/tests/live/**/*.live.js --verbose",
+    "db:migrate": "node scripts/migrate.js",
+    "test:db": "jest --testMatch **/tests/db/**/*.db.js --runInBand --verbose"
   },
   "engines": {
     "node": ">=20"
